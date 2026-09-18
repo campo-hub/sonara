@@ -2,39 +2,31 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
-const navItems = [
-  { label: 'Home', icon: '⌂', active: true },
-  { label: 'Discover', icon: '◉' },
-  { label: 'Library', icon: '♫' },
-  { label: 'DJ', icon: '✦' },
-  { label: 'Appearance Lab', icon: '◈' }
+const galleryCards = [
+  { id: 'splash', label: 'Splash / Loading', type: 'splash' },
+  { id: 'login', label: 'Login', type: 'login' },
+  { id: 'register', label: 'Register', type: 'register' },
+  { id: 'home', label: 'Home', type: 'home' },
+  { id: 'discover', label: 'Discover', type: 'discover' },
+  { id: 'library', label: 'Library', type: 'library' },
+  { id: 'album', label: 'Album / Folder', type: 'album' },
+  { id: 'playlist', label: 'Playlist', type: 'playlist' },
+  { id: 'player', label: 'Full Player', type: 'player' },
+  { id: 'dj', label: 'DJ Mode', type: 'dj' },
+  { id: 'appearance', label: 'Appearance Lab', type: 'appearance' },
+  { id: 'equalizer', label: 'Equalizer', type: 'equalizer' },
+  { id: 'sleep', label: 'Sleep Timer', type: 'sleep' },
+  { id: 'options', label: 'Song Options', type: 'options' },
+  { id: 'settings', label: 'Settings', type: 'settings' },
+  { id: 'dashboard', label: 'Admin', type: 'dashboard' }
 ];
 
-const samplePlaylists = [
-  { name: 'Chill Collection', tracks: 42 },
-  { name: 'Workout', tracks: 28 },
-  { name: 'Night Drive', tracks: 24 },
-  { name: 'Favorites', tracks: 16 }
-];
-
+const playlistNames = ['Chill Collection', 'Workout', 'Favorites', 'Night Drive'];
 const recentTracks = [
-  { id: 1, title: 'Velvet Echo', artist: 'Nova Echo', cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
-  { id: 2, title: 'Glass Horizon', artist: 'Aster Vale', cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
-  { id: 3, title: 'Lunar Drift', artist: 'Prism Avenue', cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' },
-  { id: 4, title: 'Afterglow', artist: 'Mira Bloom', cover: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=600&q=80' }
-];
-
-const soundscapes = [
-  { name: 'Chill', tracks: 42, accent: 'pink' },
-  { name: 'Workout', tracks: 28, accent: 'cyan' },
-  { name: 'Focus', tracks: 18, accent: 'violet' },
-  { name: 'Night Drive', tracks: 31, accent: 'gold' }
-];
-
-const themePresets = [
-  { name: 'Cyber Night' },
-  { name: 'Ocean Glass' },
-  { name: 'Solar Flare' }
+  { title: 'Neon', artist: 'Luma' },
+  { title: 'Wild Echo', artist: 'Aster' },
+  { title: 'Glass Sky', artist: 'Nova' },
+  { title: 'Midnight', artist: 'Mira' }
 ];
 
 function formatTime(totalSeconds) {
@@ -45,36 +37,28 @@ function formatTime(totalSeconds) {
 
 export default function App() {
   const [songs, setSongs] = useState([]);
-  const [featured, setFeatured] = useState({ curated: [], trending: [], mood: 'Late-night glow' });
   const [selectedSong, setSelectedSong] = useState(null);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState(82);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const fileInputRef = useRef(null);
 
-  async function loadData() {
-    try {
-      const [catalogRes, featuredRes] = await Promise.all([
-        fetch(`${apiBase}/catalog`),
-        fetch(`${apiBase}/featured`)
-      ]);
-
-      const catalogData = await catalogRes.json();
-      const featuredData = await featuredRes.json();
-
-      setSongs(catalogData.songs || []);
-      setFeatured(featuredData);
-      if ((catalogData.songs || []).length > 0) {
-        setSelectedSong(catalogData.songs[0]);
-      }
-    } catch (error) {
-      console.error('Failed to load Sonara data:', error);
-    }
-  }
+  const activeTrack = useMemo(() => {
+    if (!selectedSong) return 0.72;
+    return selectedSong.duration ? Math.min(progress / selectedSong.duration, 1) : 0.72;
+  }, [progress, selectedSong]);
 
   useEffect(() => {
-    loadData();
+    const demoSongs = [
+      { id: '1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: 205, cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
+      { id: '2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: 248, cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
+      { id: '3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: 222, cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' },
+      { id: '4', title: 'Afterglow', artist: 'Mira Bloom', album: 'Slow Burn', duration: 196, cover: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=600&q=80' }
+    ];
+
+    setSongs(demoSongs);
+    setSelectedSong(demoSongs[0]);
   }, []);
 
   useEffect(() => {
@@ -91,46 +75,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, [selectedSong, isPlaying]);
 
-  const activeTrack = useMemo(() => {
-    if (!selectedSong) return 0;
-    return selectedSong.duration ? Math.min(progress / selectedSong.duration, 1) : 0;
-  }, [progress, selectedSong]);
-
-  const handleSelectSong = (song) => {
-    setSelectedSong(song);
-    setProgress(0);
-    setIsPlaying(true);
-  };
-
   const handleBulkUpload = async (event) => {
-    const selectedFiles = Array.from(event.target.files || []);
-    if (!selectedFiles.length) return;
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
 
     setIsUploading(true);
-    setUploadStatus('Preparing bulk upload...');
+    setUploadStatus('Preparing album import...');
 
     const form = new FormData();
-    selectedFiles.forEach((file) => form.append('files', file, file.webkitRelativePath || file.name));
+    files.forEach((file) => form.append('files', file, file.webkitRelativePath || file.name));
 
     try {
-      const response = await fetch(`${apiBase}/uploads/bulk`, {
-        method: 'POST',
-        body: form
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Upload failed');
-
-      const uploadedTracks = data.tracks || [];
-      if (uploadedTracks.length > 0) {
-        setSongs((current) => [...uploadedTracks, ...current]);
-        setSelectedSong(uploadedTracks[0]);
-        setUploadStatus(`${uploadedTracks.length} tracks imported into your library.`);
-      } else {
-        setUploadStatus('Upload complete.');
-      }
+      const res = await fetch(`${apiBase}/uploads/bulk`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Upload failed');
+      setUploadStatus(`${data.tracks?.length || files.length} tracks imported to the library.`);
+      if (data.tracks?.[0]) setSelectedSong(data.tracks[0]);
     } catch (error) {
-      setUploadStatus(error.message || 'Bulk upload failed.');
+      setUploadStatus(error.message || 'Import failed.');
     } finally {
       setIsUploading(false);
       event.target.value = '';
@@ -138,289 +100,285 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar glass-panel">
-        <div className="brand-wrap">
+    <div className="reference-shell">
+      <header className="reference-topbar glass-panel">
+        <div className="brand-lockup">
           <div className="brand-mark">S</div>
           <div>
-            <p className="eyebrow">Studio</p>
+            <span className="brand-sub">Web App — All Pages</span>
             <h1>SONARA</h1>
           </div>
         </div>
-
-        <nav className="nav-menu">
-          {navItems.map((item) => (
-            <button key={item.label} className={`nav-item ${item.active ? 'active' : ''}`}>
-              <span className="nav-icon">{item.icon}</span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-section">
-          <div className="section-row">
-            <p className="section-label">Your playlists</p>
-            <button className="tiny-button">+ New</button>
-          </div>
-
-          <div className="playlist-list">
-            {samplePlaylists.map((playlist) => (
-              <div key={playlist.name} className="playlist-item">
-                <span className="playlist-dot" />
-                <span>{playlist.name}</span>
-                <small>{playlist.tracks}</small>
-              </div>
-            ))}
-          </div>
+        <div className="topbar-controls">
+          <span>Save vibe</span>
+          <button>Profile</button>
         </div>
+      </header>
 
-        <div className="sidebar-footer">
-          <div className="mini-profile">
-            <div className="avatar">JS</div>
-            <div>
-              <strong>John S.</strong>
-              <small>Profile</small>
-            </div>
+      <div className="reference-grid">
+        <article className="screen-card splash-card glass-panel">
+          <div className="card-header">
+            <span>1.</span>
+            <span>Splash / Loading</span>
           </div>
-          <button className="settings-button">⚙</button>
-        </div>
-      </aside>
-
-      <main className="main-panel">
-        <header className="topbar glass-panel">
-          <div className="topbar-left">
-            <button className="round-button">←</button>
-            <button className="round-button">→</button>
+          <div className="orb-shell">
+            <div className="orb-ring large" />
+            <div className="orb-ring mid" />
+            <div className="orb-ring small" />
           </div>
+          <div className="splash-title">SONARA</div>
+        </article>
 
-          <label className="search-box" aria-label="Search music">
-            <span>⌕</span>
-            <input placeholder="Search songs, artists, albums" />
-          </label>
-
-          <div className="profile-pill">
-            <div className="avatar">JS</div>
-            <span>John S.</span>
+        <article className="screen-card login-card glass-panel">
+          <div className="card-header">
+            <span>2.</span>
+            <span>Login</span>
           </div>
-        </header>
-
-        <section className="hero glass-panel">
-          <div className="hero-copy">
-            <p className="eyebrow accent">Good evening, John</p>
-            <h2>What do you want to hear?</h2>
-            <p>
-              Sonara is shaping a mood for you right now. Let the DJ session pull from your history, your vibe, and the room energy.
-            </p>
-            <div className="hero-actions">
-              <button className="primary-button">Let Sonara set the vibe</button>
-              <button className="secondary-button">DJ mode</button>
-            </div>
+          <div className="mini-form">
+            <div className="field line" />
+            <div className="field line short" />
+            <div className="button-pill" />
           </div>
+        </article>
 
-          <div className="dj-stage">
-            <div className="dj-rings">
-              <span className="ring ring-one" />
-              <span className="ring ring-two" />
-              <span className="ring ring-three" />
-              <span className="ring ring-center" />
-            </div>
-            <div className="dj-panel">
-              <span className="tiny-badge">Current Vibe</span>
-              <strong>Chill</strong>
-              <small>Auto DJ session</small>
-            </div>
+        <article className="screen-card register-card glass-panel">
+          <div className="card-header">
+            <span>3.</span>
+            <span>Register</span>
           </div>
-        </section>
-
-        <section className="upload-panel glass-panel">
-          <div className="upload-copy">
-            <p className="eyebrow accent">Bulk upload</p>
-            <h3>Drop in an album folder or ZIP</h3>
+          <div className="mini-form">
+            <div className="field line" />
+            <div className="field line short" />
+            <div className="button-pill" />
           </div>
+        </article>
 
-          <div className="upload-actions">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-            >
-              {isUploading ? 'Uploading...' : 'Choose folder'}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              webkitdirectory="true"
-              directory="true"
-              accept="audio/*,image/*,.zip"
-              onChange={handleBulkUpload}
-              style={{ display: 'none' }}
-            />
+        <article className="screen-card home-card glass-panel">
+          <div className="card-header">
+            <span>4.</span>
+            <span>Home</span>
           </div>
-
-          {uploadStatus ? <div className="upload-status">{uploadStatus}</div> : null}
-        </section>
-
-        <section className="row-block">
-          <div className="row-header">
-            <h3>Recently Played</h3>
-            <button>See all</button>
+          <div className="home-topline">
+            <span>Good evening, John</span>
+            <span className="pill-tag">DJ</span>
           </div>
-
-          <div className="recent-grid">
-            {recentTracks.map((track) => (
-              <button key={track.id} className="recent-card" onClick={() => handleSelectSong({ ...track, album: 'Recent Mix', duration: 210, cover: track.cover })}>
-                <img src={track.cover} alt={track.title} />
-                <strong>{track.title}</strong>
-                <span>{track.artist}</span>
-              </button>
+          <div className="visualizer-wrap">
+            <div className="visualizer-core" />
+            <div className="visualizer-ring" />
+          </div>
+          <div className="playlist-row">
+            {playlistNames.map((name, idx) => (
+              <span key={name} className={`mini-pill ${idx % 2 ? 'soft' : ''}`}>{name}</span>
             ))}
           </div>
-        </section>
+        </article>
 
-        <section className="row-block">
-          <div className="row-header">
-            <h3>Soundscapes</h3>
-            <button>Curated vibes</button>
+        <article className="screen-card discover-card glass-panel">
+          <div className="card-header">
+            <span>5.</span>
+            <span>Discover</span>
           </div>
-
-          <div className="soundscape-grid">
-            {soundscapes.map((sound) => (
-              <button key={sound.name} className={`soundscape-card accent-${sound.accent}`}>
-                <div className="soundscape-art" />
-                <div className="soundscape-meta">
-                  <strong>{sound.name}</strong>
-                  <span>{sound.tracks} tracks</span>
-                </div>
-              </button>
-            ))}
+          <div className="tile-grid compact">
+            <span className="color-tile magenta" />
+            <span className="color-tile purple" />
+            <span className="color-tile blue" />
+            <span className="color-tile cyan" />
           </div>
-        </section>
+        </article>
 
-        <section className="row-block">
-          <div className="row-header">
-            <h3>Library</h3>
-            <div className="library-tabs">
-              <button className="tab active">All Music</button>
-              <button className="tab">Folders</button>
-              <button className="tab">Playlists</button>
-              <button className="tab">Artists</button>
+        <article className="screen-card library-card glass-panel">
+          <div className="card-header">
+            <span>6.</span>
+            <span>Library</span>
+          </div>
+          <div className="library-toolbar">
+            <span>All Music</span>
+            <span>Playlists</span>
+            <span>Artists</span>
+          </div>
+          <div className="library-table">
+            <div className="table-row" />
+            <div className="table-row" />
+            <div className="table-row" />
+          </div>
+        </article>
+
+        <article className="screen-card album-card glass-panel">
+          <div className="card-header">
+            <span>7.</span>
+            <span>Album / Folder</span>
+          </div>
+          <div className="album-layout">
+            <div className="album-cover" />
+            <div className="album-copy">
+              <strong>Chill Collection</strong>
+              <small>42 tracks · 2h 41m</small>
             </div>
           </div>
-
-          <div className="library-table-wrap glass-panel-soft">
-            <div className="library-table-header">
-              <span>#</span>
-              <span>Title</span>
-              <span>Artist</span>
-              <span>Album</span>
-              <span>Time</span>
-            </div>
-
-            {(songs.length ? songs : [
-              { id: '1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: 205, cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
-              { id: '2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: 248, cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
-              { id: '3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: 222, cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' }
-            ]).map((song, index) => (
-              <button key={song.id} className={`library-row ${selectedSong?.id === song.id ? 'selected' : ''}`} onClick={() => handleSelectSong(song)}>
-                <span className="track-rank">{String(index + 1).padStart(2, '0')}</span>
-                <span className="track-meta">
-                  <img src={song.cover} alt={song.title} />
-                  <strong>{song.title}</strong>
-                </span>
-                <span>{song.artist}</span>
-                <span>{song.album}</span>
-                <span>{formatTime(song.duration)}</span>
-              </button>
-            ))}
+          <div className="track-list small">
+            <span />
+            <span />
+            <span />
           </div>
-        </section>
-      </main>
+        </article>
 
-      <aside className="right-panel glass-panel">
-        <div className="panel-label-wrap">
-          <p className="section-label">Now Playing</p>
-        </div>
-
-        {selectedSong ? (
-          <>
-            <div className="album-visual">
-              <img src={selectedSong.cover} alt={selectedSong.title} />
-            </div>
-
-            <div className="track-details">
-              <h3>{selectedSong.title}</h3>
-              <p>{selectedSong.artist}</p>
-            </div>
-
-            <div className="progress-wrap">
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${activeTrack * 100}%` }} />
-              </div>
-              <div className="time-row">
-                <span>{formatTime(progress)}</span>
-                <span>{formatTime(selectedSong.duration)}</span>
-              </div>
-            </div>
-
-            <div className="player-controls">
-              <button className="small-button">⏮</button>
-              <button className="play-button" onClick={() => setIsPlaying((value) => !value)}>
-                {isPlaying ? '⏸' : '▶'}
-              </button>
-              <button className="small-button">⏭</button>
-            </div>
-
-            <div className="context-row">
-              <button className="chip">EQ</button>
-              <button className="chip">Sleep Timer</button>
-              <button className="chip">Change Vibe</button>
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">Loading player...</div>
-        )}
-
-        <div className="appearance-card">
-          <p className="section-label">Appearance Lab</p>
-          <div className="preset-list">
-            {themePresets.map((preset) => (
-              <div key={preset.name} className={`preset-pill ${preset.name === 'Cyber Night' ? 'active' : ''}`}>
-                {preset.name}
-              </div>
-            ))}
+        <article className="screen-card playlist-card glass-panel">
+          <div className="card-header">
+            <span>8.</span>
+            <span>Playlist</span>
           </div>
-        </div>
-      </aside>
-
-      <footer className="mini-player glass-panel">
-        <div className="mini-track">
-          <div className="mini-art">
-            <img src={selectedSong?.cover || 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=200&q=80'} alt={selectedSong?.title || 'Now playing'} />
+          <div className="track-list">
+            <span />
+            <span />
+            <span />
+            <span />
           </div>
+        </article>
+
+        <article className="screen-card player-card glass-panel">
+          <div className="card-header">
+            <span>9.</span>
+            <span>Full player</span>
+          </div>
+          <div className="player-hero">
+            <div className="art-disk" />
+          </div>
+          <div className="track-line" />
+          <div className="control-row">
+            <span />
+            <span className="center" />
+            <span />
+          </div>
+        </article>
+
+        <article className="screen-card dj-card glass-panel">
+          <div className="card-header">
+            <span>10.</span>
+            <span>DJ Mode</span>
+          </div>
+          <div className="dj-visual">
+            <div className="dj-orbit orbit-one" />
+            <div className="dj-orbit orbit-two" />
+          </div>
+          <div className="stat-pills">
+            <span>Chill</span>
+            <span>Queue</span>
+          </div>
+        </article>
+
+        <article className="screen-card appearance-card glass-panel">
+          <div className="card-header">
+            <span>11.</span>
+            <span>Appearance Lab</span>
+          </div>
+          <div className="swatches">
+            <span className="swatch purple" />
+            <span className="swatch blue" />
+            <span className="swatch magenta" />
+          </div>
+        </article>
+
+        <article className="screen-card equalizer-card glass-panel">
+          <div className="card-header">
+            <span>12.</span>
+            <span>Equalizer</span>
+          </div>
+          <div className="equalizer-bars">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </article>
+
+        <article className="screen-card timer-card glass-panel">
+          <div className="card-header">
+            <span>13.</span>
+            <span>Sleep Timer</span>
+          </div>
+          <div className="timer-ring" />
+        </article>
+
+        <article className="screen-card options-card glass-panel">
+          <div className="card-header">
+            <span>14.</span>
+            <span>Song Options</span>
+          </div>
+          <div className="option-list">
+            <span>Play</span>
+            <span>Favorite</span>
+            <span>Delete</span>
+          </div>
+        </article>
+
+        <article className="screen-card settings-card glass-panel">
+          <div className="card-header">
+            <span>15.</span>
+            <span>Settings</span>
+          </div>
+          <div className="toggle-stack">
+            <span />
+            <span />
+            <span />
+          </div>
+        </article>
+
+        <article className="screen-card admin-card glass-panel">
+          <div className="card-header">
+            <span>16.</span>
+            <span>Admin</span>
+          </div>
+          <div className="admin-grid">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </article>
+      </div>
+
+      <section className="utility-panel glass-panel">
+        <div className="utility-left">
+          <div className="utility-cover" />
           <div>
-            <strong>{selectedSong?.title || 'Midnight Drive'}</strong>
-            <span>{selectedSong?.artist || 'Nova Echo'}</span>
+            <strong>Midnight Drive</strong>
+            <span>Nova Echo</span>
           </div>
         </div>
 
-        <div className="mini-controls">
-          <button className="small-button">♡</button>
-          <button className="small-button">⏮</button>
-          <button className="play-button small-player" onClick={() => setIsPlaying((value) => !value)}>
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-          <button className="small-button">⏭</button>
-          <button className="small-button">↻</button>
+        <div className="utility-center">
+          <div className="transport-row">
+            <button>♡</button>
+            <button>⏮</button>
+            <button className="play-toggle" onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? '⏸' : '▶'}</button>
+            <button>⏭</button>
+            <button>↻</button>
+          </div>
         </div>
 
-        <div className="mini-progress">
+        <div className="utility-right">
           <span>{formatTime(progress)}</span>
-          <div className="progress-bar mini"><div className="progress-fill" style={{ width: `${activeTrack * 100}%` }} /></div>
+          <div className="mini-progress"><span style={{ width: `${activeTrack * 100}%` }} /></div>
           <span>{selectedSong ? formatTime(selectedSong.duration) : '3:25'}</span>
         </div>
-      </footer>
+      </section>
+
+      <section className="upload-bar glass-panel">
+        <div className="upload-copy">
+          <span className="eyebrow accent">Bulk upload</span>
+          <strong>Drop in an album folder or ZIP</strong>
+        </div>
+
+        <div className="upload-actions">
+          <button type="button" className="primary-button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+            {isUploading ? 'Uploading...' : 'Choose folder'}
+          </button>
+          <input ref={fileInputRef} type="file" multiple webkitdirectory="true" directory="true" accept="audio/*,image/*,.zip" onChange={handleBulkUpload} style={{ display: 'none' }} />
+        </div>
+
+        {uploadStatus ? <div className="upload-status">{uploadStatus}</div> : null}
+      </section>
     </div>
   );
 }
