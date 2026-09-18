@@ -1,0 +1,30 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / frontend
+Web/node_modules/
+Web/dist/
+Web/.env
+Web/.env.local
+Web/.env.production
+
+# Backend
+backend/node_modules/
+backend/.env
+backend/.env.local
+backend/.env.production
+backend/serviceaccount.json
+
+# Java / Android
+android/.gradle/
+android/local.properties
+android/**/build/
+
+# GitHub Pages publish branch output
+gh-pages/
+
+# Logs
+*.log
