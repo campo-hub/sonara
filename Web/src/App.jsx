@@ -2,21 +2,39 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
-const sidebarItems = [
-  'Home',
-  'Search',
-  'Your Library',
-  'Discover',
-  'Artists',
-  'Albums',
-  'Playlists'
+const navItems = [
+  { label: 'Home', icon: '⌂', active: true },
+  { label: 'Discover', icon: '◉' },
+  { label: 'Library', icon: '♫' },
+  { label: 'DJ', icon: '✦' },
+  { label: 'Appearance Lab', icon: '◈' }
 ];
 
 const samplePlaylists = [
+  { name: 'Chill Collection', tracks: 42 },
+  { name: 'Workout', tracks: 28 },
   { name: 'Night Drive', tracks: 24 },
-  { name: 'Focus Flow', tracks: 18 },
-  { name: 'After Hours', tracks: 31 },
-  { name: 'Mood Booster', tracks: 12 }
+  { name: 'Favorites', tracks: 16 }
+];
+
+const recentTracks = [
+  { id: 1, title: 'Velvet Echo', artist: 'Nova Echo', cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
+  { id: 2, title: 'Glass Horizon', artist: 'Aster Vale', cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
+  { id: 3, title: 'Lunar Drift', artist: 'Prism Avenue', cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' },
+  { id: 4, title: 'Afterglow', artist: 'Mira Bloom', cover: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=600&q=80' }
+];
+
+const soundscapes = [
+  { name: 'Chill', tracks: 42, accent: 'pink' },
+  { name: 'Workout', tracks: 28, accent: 'cyan' },
+  { name: 'Focus', tracks: 18, accent: 'violet' },
+  { name: 'Night Drive', tracks: 31, accent: 'gold' }
+];
+
+const themePresets = [
+  { name: 'Cyber Night' },
+  { name: 'Ocean Glass' },
+  { name: 'Solar Flare' }
 ];
 
 function formatTime(totalSeconds) {
@@ -27,9 +45,9 @@ function formatTime(totalSeconds) {
 
 export default function App() {
   const [songs, setSongs] = useState([]);
-  const [featured, setFeatured] = useState({ curated: [], trending: [], mood: '' });
+  const [featured, setFeatured] = useState({ curated: [], trending: [], mood: 'Late-night glow' });
   const [selectedSong, setSelectedSong] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -74,7 +92,7 @@ export default function App() {
   }, [selectedSong, isPlaying]);
 
   const activeTrack = useMemo(() => {
-    if (!selectedSong) return null;
+    if (!selectedSong) return 0;
     return selectedSong.duration ? Math.min(progress / selectedSong.duration, 1) : 0;
   }, [progress, selectedSong]);
 
@@ -86,10 +104,7 @@ export default function App() {
 
   const handleBulkUpload = async (event) => {
     const selectedFiles = Array.from(event.target.files || []);
-
-    if (!selectedFiles.length) {
-      return;
-    }
+    if (!selectedFiles.length) return;
 
     setIsUploading(true);
     setUploadStatus('Preparing bulk upload...');
@@ -104,10 +119,7 @@ export default function App() {
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Upload failed');
-      }
+      if (!response.ok) throw new Error(data.message || 'Upload failed');
 
       const uploadedTracks = data.tracks || [];
       if (uploadedTracks.length > 0) {
@@ -137,15 +149,20 @@ export default function App() {
         </div>
 
         <nav className="nav-menu">
-          {sidebarItems.map((item, index) => (
-            <button key={item} className={`nav-item ${index === 0 ? 'active' : ''}`}>
-              {item}
+          {navItems.map((item) => (
+            <button key={item.label} className={`nav-item ${item.active ? 'active' : ''}`}>
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
             </button>
           ))}
         </nav>
 
         <div className="sidebar-section">
-          <p className="section-label">PLAYLISTS</p>
+          <div className="section-row">
+            <p className="section-label">Your playlists</p>
+            <button className="tiny-button">+ New</button>
+          </div>
+
           <div className="playlist-list">
             {samplePlaylists.map((playlist) => (
               <div key={playlist.name} className="playlist-item">
@@ -156,6 +173,17 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        <div className="sidebar-footer">
+          <div className="mini-profile">
+            <div className="avatar">JS</div>
+            <div>
+              <strong>John S.</strong>
+              <small>Profile</small>
+            </div>
+          </div>
+          <button className="settings-button">⚙</button>
+        </div>
       </aside>
 
       <main className="main-panel">
@@ -165,35 +193,41 @@ export default function App() {
             <button className="round-button">→</button>
           </div>
 
-          <div className="search-box">
+          <label className="search-box" aria-label="Search music">
             <span>⌕</span>
-            <input placeholder="Search for songs, artists, albums" />
-          </div>
+            <input placeholder="Search songs, artists, albums" />
+          </label>
 
           <div className="profile-pill">
             <div className="avatar">JS</div>
-            <span>Jamie S.</span>
+            <span>John S.</span>
           </div>
         </header>
 
         <section className="hero glass-panel">
           <div className="hero-copy">
-            <p className="eyebrow accent">Curated for tonight</p>
-            <h2>{featured.mood || 'Late-night glow'}</h2>
+            <p className="eyebrow accent">Good evening, John</p>
+            <h2>What do you want to hear?</h2>
             <p>
-              Discover smooth electronic sets, cinematic pop, and deep-focus cuts curated for your studio flow.
+              Sonara is shaping a mood for you right now. Let the DJ session pull from your history, your vibe, and the room energy.
             </p>
             <div className="hero-actions">
-              <button className="primary-button">Play mix</button>
-              <button className="secondary-button">Follow</button>
+              <button className="primary-button">Let Sonara set the vibe</button>
+              <button className="secondary-button">DJ mode</button>
             </div>
           </div>
 
-          <div className="hero-art">
-            <div className="art-orb orb-one" />
-            <div className="art-orb orb-two" />
-            <div className="hero-disc-wrap">
-              <div className="hero-disc" />
+          <div className="dj-stage">
+            <div className="dj-rings">
+              <span className="ring ring-one" />
+              <span className="ring ring-two" />
+              <span className="ring ring-three" />
+              <span className="ring ring-center" />
+            </div>
+            <div className="dj-panel">
+              <span className="tiny-badge">Current Vibe</span>
+              <strong>Chill</strong>
+              <small>Auto DJ session</small>
             </div>
           </div>
         </section>
@@ -201,7 +235,7 @@ export default function App() {
         <section className="upload-panel glass-panel">
           <div className="upload-copy">
             <p className="eyebrow accent">Bulk upload</p>
-            <h3>Drop an album folder or zip</h3>
+            <h3>Drop in an album folder or ZIP</h3>
           </div>
 
           <div className="upload-actions">
@@ -230,17 +264,34 @@ export default function App() {
 
         <section className="row-block">
           <div className="row-header">
-            <h3>Trending now</h3>
+            <h3>Recently Played</h3>
             <button>See all</button>
           </div>
 
-          <div className="song-grid">
-            {featured.trending.map((song) => (
-              <button key={song.id} className="track-card" onClick={() => handleSelectSong(song)}>
-                <img src={song.cover} alt={song.title} />
-                <div>
-                  <strong>{song.title}</strong>
-                  <span>{song.artist}</span>
+          <div className="recent-grid">
+            {recentTracks.map((track) => (
+              <button key={track.id} className="recent-card" onClick={() => handleSelectSong({ ...track, album: 'Recent Mix', duration: 210, cover: track.cover })}>
+                <img src={track.cover} alt={track.title} />
+                <strong>{track.title}</strong>
+                <span>{track.artist}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="row-block">
+          <div className="row-header">
+            <h3>Soundscapes</h3>
+            <button>Curated vibes</button>
+          </div>
+
+          <div className="soundscape-grid">
+            {soundscapes.map((sound) => (
+              <button key={sound.name} className={`soundscape-card accent-${sound.accent}`}>
+                <div className="soundscape-art" />
+                <div className="soundscape-meta">
+                  <strong>{sound.name}</strong>
+                  <span>{sound.tracks} tracks</span>
                 </div>
               </button>
             ))}
@@ -249,32 +300,47 @@ export default function App() {
 
         <section className="row-block">
           <div className="row-header">
-            <h3>Browse all</h3>
-            <button>Fresh picks</button>
+            <h3>Library</h3>
+            <div className="library-tabs">
+              <button className="tab active">All Music</button>
+              <button className="tab">Folders</button>
+              <button className="tab">Playlists</button>
+              <button className="tab">Artists</button>
+            </div>
           </div>
 
-          <div className="library-list">
-            {songs.map((song) => (
-              <div key={song.id} className={`library-row ${selectedSong?.id === song.id ? 'selected' : ''}`} onClick={() => handleSelectSong(song)}>
-                <div className="track-rank">0{String(songs.indexOf(song) + 1).padStart(2, '0')}</div>
-                <div className="track-meta">
+          <div className="library-table-wrap glass-panel-soft">
+            <div className="library-table-header">
+              <span>#</span>
+              <span>Title</span>
+              <span>Artist</span>
+              <span>Album</span>
+              <span>Time</span>
+            </div>
+
+            {(songs.length ? songs : [
+              { id: '1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: 205, cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
+              { id: '2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: 248, cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
+              { id: '3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: 222, cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' }
+            ]).map((song, index) => (
+              <button key={song.id} className={`library-row ${selectedSong?.id === song.id ? 'selected' : ''}`} onClick={() => handleSelectSong(song)}>
+                <span className="track-rank">{String(index + 1).padStart(2, '0')}</span>
+                <span className="track-meta">
                   <img src={song.cover} alt={song.title} />
-                  <div>
-                    <strong>{song.title}</strong>
-                    <span>{song.artist}</span>
-                  </div>
-                </div>
-                <span className="album-text">{song.album}</span>
+                  <strong>{song.title}</strong>
+                </span>
+                <span>{song.artist}</span>
+                <span>{song.album}</span>
                 <span>{formatTime(song.duration)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>
       </main>
 
       <aside className="right-panel glass-panel">
-        <div className="now-playing-header">
-          <span className="section-label">NOW PLAYING</span>
+        <div className="panel-label-wrap">
+          <p className="section-label">Now Playing</p>
         </div>
 
         {selectedSong ? (
@@ -305,11 +371,56 @@ export default function App() {
               </button>
               <button className="small-button">⏭</button>
             </div>
+
+            <div className="context-row">
+              <button className="chip">EQ</button>
+              <button className="chip">Sleep Timer</button>
+              <button className="chip">Change Vibe</button>
+            </div>
           </>
         ) : (
           <div className="empty-state">Loading player...</div>
         )}
+
+        <div className="appearance-card">
+          <p className="section-label">Appearance Lab</p>
+          <div className="preset-list">
+            {themePresets.map((preset) => (
+              <div key={preset.name} className={`preset-pill ${preset.name === 'Cyber Night' ? 'active' : ''}`}>
+                {preset.name}
+              </div>
+            ))}
+          </div>
+        </div>
       </aside>
+
+      <footer className="mini-player glass-panel">
+        <div className="mini-track">
+          <div className="mini-art">
+            <img src={selectedSong?.cover || 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=200&q=80'} alt={selectedSong?.title || 'Now playing'} />
+          </div>
+          <div>
+            <strong>{selectedSong?.title || 'Midnight Drive'}</strong>
+            <span>{selectedSong?.artist || 'Nova Echo'}</span>
+          </div>
+        </div>
+
+        <div className="mini-controls">
+          <button className="small-button">♡</button>
+          <button className="small-button">⏮</button>
+          <button className="play-button small-player" onClick={() => setIsPlaying((value) => !value)}>
+            {isPlaying ? '⏸' : '▶'}
+          </button>
+          <button className="small-button">⏭</button>
+          <button className="small-button">↻</button>
+        </div>
+
+        <div className="mini-progress">
+          <span>{formatTime(progress)}</span>
+          <div className="progress-bar mini"><div className="progress-fill" style={{ width: `${activeTrack * 100}%` }} /></div>
+          <span>{selectedSong ? formatTime(selectedSong.duration) : '3:25'}</span>
+        </div>
+      </footer>
     </div>
   );
 }
