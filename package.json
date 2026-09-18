@@ -1,0 +1,11 @@
+{
+  "name": "sonara",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install": "npm --prefix backend install --no-fund --no-audit",
+    "start": "npm --prefix backend run start",
+    "dev": "npm --prefix backend run dev",
+    "build": "npm --prefix backend install --no-fund --no-audit"
+  }
+}
