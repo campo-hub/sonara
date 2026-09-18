@@ -248,6 +248,32 @@ img {
     rgba(17, 18, 24, 0.8);
 }
 
+.upload-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-radius: 24px;
+}
+
+.upload-copy h3 {
+  margin: 8px 0 0;
+  font-size: 1.3rem;
+}
+
+.upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-status {
+  margin-top: 12px;
+  color: #bfe7ff;
+  font-size: 0.92rem;
+}
+
 .hero-copy h2 {
   margin: 12px 0;
   font-size: clamp(2.2rem, 4vw, 4rem);

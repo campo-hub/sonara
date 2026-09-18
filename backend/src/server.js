@@ -1,14 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 4000;
 
+const upload = multer({ storage: multer.memoryStorage() });
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const catalog = [
   {
@@ -40,16 +43,90 @@ const catalog = [
   }
 ];
 
+const uploadedTracks = [];
+
+const audioExtensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac'];
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+
+function isAudioFile(fileName = '') {
+  return audioExtensions.some((ext) => fileName.toLowerCase().endsWith(ext));
+}
+
+function isImageFile(fileName = '') {
+  return imageExtensions.some((ext) => fileName.toLowerCase().endsWith(ext));
+}
+
+function cleanName(fileName = '') {
+  return fileName
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
+function parseTrackMetadata(fileName, folderPath = '') {
+  const rawName = cleanName(fileName).replace(/\s+/g, ' ');
+  const folderName = folderPath.split('/').filter(Boolean).at(-1) || '';
+
+  const artistMatch = rawName.match(/^(.*?)[\s\-–—]+(.+)$/);
+  const byDash = artistMatch ? artistMatch[1].trim() : null;
+  const trackTitle = artistMatch ? artistMatch[2].trim() : rawName;
+
+  return {
+    title: trackTitle || rawName || 'Untitled Track',
+    artist: byDash || 'Unknown Artist',
+    album: folderName || 'Untitled Album'
+  };
+}
+
+function detectAlbumCover(files = []) {
+  const ranked = files
+    .filter((file) => isImageFile(file.originalname))
+    .sort((a, b) => {
+      const aIsCover = /cover|front|art|folder/i.test(a.originalname) ? 1 : 0;
+      const bIsCover = /cover|front|art|folder/i.test(b.originalname) ? 1 : 0;
+      return bIsCover - aIsCover;
+    });
+
+  if (!ranked.length) {
+    return null;
+  }
+
+  const selected = ranked[0];
+  return `data:${selected.mimetype || 'image/jpeg'};base64,${selected.buffer.toString('base64')}`;
+}
+
+function buildUploadedTrack(file, index, cover) {
+  const path = file.originalname.replace('\\', '/');
+  const folderPath = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '';
+  const metadata = parseTrackMetadata(file.originalname.split('/').at(-1) || file.originalname, folderPath);
+
+  return {
+    id: `uploaded-${Date.now()}-${index}`,
+    title: metadata.title,
+    artist: metadata.artist,
+    album: metadata.album,
+    duration: 180 + index * 8,
+    cover: cover || 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
+    audioUrl: `https://example.com/uploads/${encodeURIComponent(file.originalname)}`,
+    source: 'upload',
+    status: 'ready'
+  };
+}
+
+function mergeCatalog() {
+  return [...catalog, ...uploadedTracks];
+}
+
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', service: 'sonara-backend' });
 });
 
 app.get('/api/catalog', (_, res) => {
-  res.json({ songs: catalog });
+  res.json({ songs: mergeCatalog() });
 });
 
 app.get('/api/catalog/:id', (req, res) => {
-  const song = catalog.find((item) => item.id === req.params.id);
+  const song = mergeCatalog().find((item) => item.id === req.params.id);
   if (!song) {
     return res.status(404).json({ message: 'Song not found' });
   }
@@ -57,11 +134,41 @@ app.get('/api/catalog/:id', (req, res) => {
 });
 
 app.get('/api/featured', (_, res) => {
+  const songs = mergeCatalog();
   res.json({
-    curated: [catalog[0], catalog[2]],
-    trending: catalog,
+    curated: [songs[0], songs[2] || songs[0]],
+    trending: songs.slice(0, 6),
     mood: 'Late-night glow'
   });
+});
+
+app.get('/api/uploads', (_, res) => {
+  res.json({ uploads: uploadedTracks });
+});
+
+app.post('/api/uploads/bulk', upload.any(), (req, res) => {
+  try {
+    const files = Array.isArray(req.files) ? req.files : [];
+    const audioFiles = files.filter((file) => isAudioFile(file.originalname));
+
+    if (!audioFiles.length) {
+      return res.status(400).json({ message: 'No audio files were uploaded.' });
+    }
+
+    const cover = detectAlbumCover(files);
+    const parsedTracks = audioFiles.map((file, index) => buildUploadedTrack(file, index, cover));
+
+    uploadedTracks.unshift(...parsedTracks);
+
+    return res.json({
+      success: true,
+      uploaded: parsedTracks.length,
+      album: parsedTracks[0]?.album || 'Untitled Album',
+      tracks: parsedTracks
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Bulk upload failed.' });
+  }
 });
 
 app.listen(port, () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -31,28 +31,31 @@ export default function App() {
   const [selectedSong, setSelectedSong] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const fileInputRef = useRef(null);
+
+  async function loadData() {
+    try {
+      const [catalogRes, featuredRes] = await Promise.all([
+        fetch(`${apiBase}/catalog`),
+        fetch(`${apiBase}/featured`)
+      ]);
+
+      const catalogData = await catalogRes.json();
+      const featuredData = await featuredRes.json();
+
+      setSongs(catalogData.songs || []);
+      setFeatured(featuredData);
+      if ((catalogData.songs || []).length > 0) {
+        setSelectedSong(catalogData.songs[0]);
+      }
+    } catch (error) {
+      console.error('Failed to load Sonara data:', error);
+    }
+  }
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [catalogRes, featuredRes] = await Promise.all([
-          fetch(`${apiBase}/catalog`),
-          fetch(`${apiBase}/featured`)
-        ]);
-
-        const catalogData = await catalogRes.json();
-        const featuredData = await featuredRes.json();
-
-        setSongs(catalogData.songs || []);
-        setFeatured(featuredData);
-        if ((catalogData.songs || []).length > 0) {
-          setSelectedSong(catalogData.songs[0]);
-        }
-      } catch (error) {
-        console.error('Failed to load Sonara data:', error);
-      }
-    }
-
     loadData();
   }, []);
 
@@ -79,6 +82,47 @@ export default function App() {
     setSelectedSong(song);
     setProgress(0);
     setIsPlaying(true);
+  };
+
+  const handleBulkUpload = async (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+
+    if (!selectedFiles.length) {
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadStatus('Preparing bulk upload...');
+
+    const form = new FormData();
+    selectedFiles.forEach((file) => form.append('files', file, file.webkitRelativePath || file.name));
+
+    try {
+      const response = await fetch(`${apiBase}/uploads/bulk`, {
+        method: 'POST',
+        body: form
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Upload failed');
+      }
+
+      const uploadedTracks = data.tracks || [];
+      if (uploadedTracks.length > 0) {
+        setSongs((current) => [...uploadedTracks, ...current]);
+        setSelectedSong(uploadedTracks[0]);
+        setUploadStatus(`${uploadedTracks.length} tracks imported into your library.`);
+      } else {
+        setUploadStatus('Upload complete.');
+      }
+    } catch (error) {
+      setUploadStatus(error.message || 'Bulk upload failed.');
+    } finally {
+      setIsUploading(false);
+      event.target.value = '';
+    }
   };
 
   return (
@@ -154,6 +198,36 @@ export default function App() {
           </div>
         </section>
 
+        <section className="upload-panel glass-panel">
+          <div className="upload-copy">
+            <p className="eyebrow accent">Bulk upload</p>
+            <h3>Drop an album folder or zip</h3>
+          </div>
+
+          <div className="upload-actions">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? 'Uploading...' : 'Choose folder'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              webkitdirectory="true"
+              directory="true"
+              accept="audio/*,image/*,.zip"
+              onChange={handleBulkUpload}
+              style={{ display: 'none' }}
+            />
+          </div>
+
+          {uploadStatus ? <div className="upload-status">{uploadStatus}</div> : null}
+        </section>
+
         <section className="row-block">
           <div className="row-header">
             <h3>Trending now</h3>
@@ -182,7 +256,7 @@ export default function App() {
           <div className="library-list">
             {songs.map((song) => (
               <div key={song.id} className={`library-row ${selectedSong?.id === song.id ? 'selected' : ''}`} onClick={() => handleSelectSong(song)}>
-                <div className="track-rank">0{song.id}</div>
+                <div className="track-rank">0{String(songs.indexOf(song) + 1).padStart(2, '0')}</div>
                 <div className="track-meta">
                   <img src={song.cover} alt={song.title} />
                   <div>
