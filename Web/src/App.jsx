@@ -100,134 +100,111 @@ export default function App() {
   };
 
   return (
-    <div className="reference-shell">
-      <header className="reference-topbar glass-panel">
+    <div className="all-pages-shell">
+      <header className="pages-header glass-panel">
         <div className="brand-lockup">
           <div className="brand-mark">S</div>
           <div>
-            <span className="brand-sub">Web App — All Pages</span>
+            <span className="brand-sub">all pages / screen set</span>
             <h1>SONARA</h1>
           </div>
         </div>
-        <div className="topbar-controls">
-          <span>Save vibe</span>
-          <button>Profile</button>
+        <div className="header-actions">
+          <span>mobile + desktop</span>
+          <button>View system</button>
         </div>
       </header>
 
-      <div className="reference-grid">
-        <article className="screen-card splash-card glass-panel">
-          <div className="card-header">
-            <span>1.</span>
-            <span>Splash / Loading</span>
+      <main className="pages-board">
+        <article className="page-card intro-card glass-panel">
+          <div className="page-card-header">splash / loading</div>
+          <div className="brand-orbit">
+            <span className="orbit large" />
+            <span className="orbit mid" />
+            <span className="orbit core" />
           </div>
-          <div className="orb-shell">
-            <div className="orb-ring large" />
-            <div className="orb-ring mid" />
-            <div className="orb-ring small" />
-          </div>
-          <div className="splash-title">SONARA</div>
+          <div className="page-title">SONARA</div>
         </article>
 
-        <article className="screen-card login-card glass-panel">
-          <div className="card-header">
-            <span>2.</span>
-            <span>Login</span>
-          </div>
-          <div className="mini-form">
-            <div className="field line" />
-            <div className="field line short" />
-            <div className="button-pill" />
+        <article className="page-card auth-card glass-panel">
+          <div className="page-card-header">login</div>
+          <div className="field-stack">
+            <span className="field line" />
+            <span className="field line short" />
+            <span className="action-pill" />
           </div>
         </article>
 
-        <article className="screen-card register-card glass-panel">
-          <div className="card-header">
-            <span>3.</span>
-            <span>Register</span>
-          </div>
-          <div className="mini-form">
-            <div className="field line" />
-            <div className="field line short" />
-            <div className="button-pill" />
+        <article className="page-card auth-card glass-panel">
+          <div className="page-card-header">register</div>
+          <div className="field-stack">
+            <span className="field line" />
+            <span className="field line" />
+            <span className="field line short" />
+            <span className="action-pill" />
           </div>
         </article>
 
-        <article className="screen-card home-card glass-panel">
-          <div className="card-header">
-            <span>4.</span>
-            <span>Home</span>
+        <article className="page-card home-card glass-panel">
+          <div className="page-card-header">home</div>
+          <div className="home-head">
+            <span>Good evening</span>
+            <span className="tiny-pill">DJ</span>
           </div>
-          <div className="home-topline">
-            <span>Good evening, John</span>
-            <span className="pill-tag">DJ</span>
+          <div className="home-visual">
+            <span className="visual-core" />
+            <span className="visual-ring" />
           </div>
-          <div className="visualizer-wrap">
-            <div className="visualizer-core" />
-            <div className="visualizer-ring" />
-          </div>
-          <div className="playlist-row">
-            {playlistNames.map((name, idx) => (
-              <span key={name} className={`mini-pill ${idx % 2 ? 'soft' : ''}`}>{name}</span>
+          <div className="chip-row">
+            {playlistNames.map((item, index) => (
+              <span key={item} className={index % 2 ? 'chip soft' : 'chip'}>{item}</span>
             ))}
           </div>
         </article>
 
-        <article className="screen-card discover-card glass-panel">
-          <div className="card-header">
-            <span>5.</span>
-            <span>Discover</span>
-          </div>
-          <div className="tile-grid compact">
-            <span className="color-tile magenta" />
-            <span className="color-tile purple" />
-            <span className="color-tile blue" />
-            <span className="color-tile cyan" />
+        <article className="page-card discover-card glass-panel">
+          <div className="page-card-header">discover</div>
+          <div className="tile-grid">
+            <span className="tile magenta" />
+            <span className="tile purple" />
+            <span className="tile blue" />
+            <span className="tile cyan" />
           </div>
         </article>
 
-        <article className="screen-card library-card glass-panel">
-          <div className="card-header">
-            <span>6.</span>
-            <span>Library</span>
+        <article className="page-card library-card glass-panel">
+          <div className="page-card-header">library</div>
+          <div className="lib-tabs">
+            <span>All</span>
+            <span>Playlist</span>
+            <span>Artist</span>
           </div>
-          <div className="library-toolbar">
-            <span>All Music</span>
-            <span>Playlists</span>
-            <span>Artists</span>
-          </div>
-          <div className="library-table">
-            <div className="table-row" />
-            <div className="table-row" />
-            <div className="table-row" />
+          <div className="lib-list">
+            <span />
+            <span />
+            <span />
           </div>
         </article>
 
-        <article className="screen-card album-card glass-panel">
-          <div className="card-header">
-            <span>7.</span>
-            <span>Album / Folder</span>
-          </div>
-          <div className="album-layout">
-            <div className="album-cover" />
-            <div className="album-copy">
+        <article className="page-card album-card glass-panel">
+          <div className="page-card-header">album / folder</div>
+          <div className="album-inline">
+            <span className="art-cover" />
+            <div>
               <strong>Chill Collection</strong>
               <small>42 tracks · 2h 41m</small>
             </div>
           </div>
-          <div className="track-list small">
+          <div className="track-lines">
             <span />
             <span />
             <span />
           </div>
         </article>
 
-        <article className="screen-card playlist-card glass-panel">
-          <div className="card-header">
-            <span>8.</span>
-            <span>Playlist</span>
-          </div>
-          <div className="track-list">
+        <article className="page-card playlist-card glass-panel">
+          <div className="page-card-header">playlist</div>
+          <div className="audio-list">
             <span />
             <span />
             <span />
@@ -235,55 +212,41 @@ export default function App() {
           </div>
         </article>
 
-        <article className="screen-card player-card glass-panel">
-          <div className="card-header">
-            <span>9.</span>
-            <span>Full player</span>
-          </div>
-          <div className="player-hero">
-            <div className="art-disk" />
-          </div>
-          <div className="track-line" />
-          <div className="control-row">
+        <article className="page-card player-card glass-panel">
+          <div className="page-card-header">full player</div>
+          <div className="player-art" />
+          <div className="track-bar" />
+          <div className="transport-buttons">
             <span />
             <span className="center" />
             <span />
           </div>
         </article>
 
-        <article className="screen-card dj-card glass-panel">
-          <div className="card-header">
-            <span>10.</span>
-            <span>DJ Mode</span>
+        <article className="page-card dj-card glass-panel">
+          <div className="page-card-header">dj mode</div>
+          <div className="dj-ring-shell">
+            <span className="dj-ring one" />
+            <span className="dj-ring two" />
           </div>
-          <div className="dj-visual">
-            <div className="dj-orbit orbit-one" />
-            <div className="dj-orbit orbit-two" />
-          </div>
-          <div className="stat-pills">
+          <div className="two-pills">
             <span>Chill</span>
             <span>Queue</span>
           </div>
         </article>
 
-        <article className="screen-card appearance-card glass-panel">
-          <div className="card-header">
-            <span>11.</span>
-            <span>Appearance Lab</span>
-          </div>
-          <div className="swatches">
+        <article className="page-card settings-card glass-panel">
+          <div className="page-card-header">appearance lab</div>
+          <div className="swatch-row">
             <span className="swatch purple" />
-            <span className="swatch blue" />
+            <span className="swatch cyan" />
             <span className="swatch magenta" />
           </div>
         </article>
 
-        <article className="screen-card equalizer-card glass-panel">
-          <div className="card-header">
-            <span>12.</span>
-            <span>Equalizer</span>
-          </div>
-          <div className="equalizer-bars">
+        <article className="page-card equalizer-card glass-panel">
+          <div className="page-card-header">equalizer</div>
+          <div className="bar-graph">
             <span />
             <span />
             <span />
@@ -292,93 +255,14 @@ export default function App() {
           </div>
         </article>
 
-        <article className="screen-card timer-card glass-panel">
-          <div className="card-header">
-            <span>13.</span>
-            <span>Sleep Timer</span>
-          </div>
-          <div className="timer-ring" />
-        </article>
-
-        <article className="screen-card options-card glass-panel">
-          <div className="card-header">
-            <span>14.</span>
-            <span>Song Options</span>
-          </div>
-          <div className="option-list">
-            <span>Play</span>
-            <span>Favorite</span>
-            <span>Delete</span>
+        <article className="page-card upload-card glass-panel">
+          <div className="page-card-header">bulk upload</div>
+          <div className="upload-box">
+            <span className="upload-badge">drop folder</span>
+            <span className="upload-button">choose folder</span>
           </div>
         </article>
-
-        <article className="screen-card settings-card glass-panel">
-          <div className="card-header">
-            <span>15.</span>
-            <span>Settings</span>
-          </div>
-          <div className="toggle-stack">
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
-
-        <article className="screen-card admin-card glass-panel">
-          <div className="card-header">
-            <span>16.</span>
-            <span>Admin</span>
-          </div>
-          <div className="admin-grid">
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
-      </div>
-
-      <section className="utility-panel glass-panel">
-        <div className="utility-left">
-          <div className="utility-cover" />
-          <div>
-            <strong>Midnight Drive</strong>
-            <span>Nova Echo</span>
-          </div>
-        </div>
-
-        <div className="utility-center">
-          <div className="transport-row">
-            <button>♡</button>
-            <button>⏮</button>
-            <button className="play-toggle" onClick={() => setIsPlaying((v) => !v)}>{isPlaying ? '⏸' : '▶'}</button>
-            <button>⏭</button>
-            <button>↻</button>
-          </div>
-        </div>
-
-        <div className="utility-right">
-          <span>{formatTime(progress)}</span>
-          <div className="mini-progress"><span style={{ width: `${activeTrack * 100}%` }} /></div>
-          <span>{selectedSong ? formatTime(selectedSong.duration) : '3:25'}</span>
-        </div>
-      </section>
-
-      <section className="upload-bar glass-panel">
-        <div className="upload-copy">
-          <span className="eyebrow accent">Bulk upload</span>
-          <strong>Drop in an album folder or ZIP</strong>
-        </div>
-
-        <div className="upload-actions">
-          <button type="button" className="primary-button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-            {isUploading ? 'Uploading...' : 'Choose folder'}
-          </button>
-          <input ref={fileInputRef} type="file" multiple webkitdirectory="true" directory="true" accept="audio/*,image/*,.zip" onChange={handleBulkUpload} style={{ display: 'none' }} />
-        </div>
-
-        {uploadStatus ? <div className="upload-status">{uploadStatus}</div> : null}
-      </section>
+      </main>
     </div>
   );
 }
