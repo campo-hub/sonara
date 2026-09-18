@@ -1,4 +1,4 @@
-package com.castmobile.sender.ui
+package com.sonara.app.ui
 
 import android.app.Application
 import android.app.RecoverableSecurityException
@@ -15,15 +15,15 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.castmobile.sender.dj.DJSessionPlanner
-import com.castmobile.sender.dj.ListeningHistory
-import com.castmobile.sender.dj.PreferenceEngine
-import com.castmobile.sender.dj.QueueGenerator
-import com.castmobile.sender.dj.SongAnalyzer
-import com.castmobile.sender.media.MediaService
-import com.castmobile.sender.model.Folder
-import com.castmobile.sender.model.Track
-import com.castmobile.sender.repository.MusicRepository
+import com.sonara.app.dj.DJSessionPlanner
+import com.sonara.app.dj.ListeningHistory
+import com.sonara.app.dj.PreferenceEngine
+import com.sonara.app.dj.QueueGenerator
+import com.sonara.app.dj.SongAnalyzer
+import com.sonara.app.media.MediaService
+import com.sonara.app.model.Folder
+import com.sonara.app.model.Track
+import com.sonara.app.repository.MusicRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

@@ -1,4 +1,4 @@
-package com.castmobile.sender.model
+package com.sonara.app.model
 
 import android.net.Uri
 

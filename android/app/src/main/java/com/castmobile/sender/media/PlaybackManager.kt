@@ -1,8 +1,8 @@
-package com.castmobile.sender.media
+package com.sonara.app.media
 
 import android.content.Context
 import android.media.MediaPlayer
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Track
 
 class PlaybackManager(private val context: Context) {
     private var mediaPlayer: MediaPlayer? = null

@@ -10,7 +10,22 @@ const port = process.env.PORT || 4000;
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error('CORS blocked for this origin'));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 
 const catalog = [

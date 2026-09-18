@@ -1,4 +1,4 @@
-package com.castmobile.sender.media
+package com.sonara.app.media
 
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
@@ -23,8 +23,8 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.media.session.MediaButtonReceiver
-import com.castmobile.sender.model.Track
-import com.castmobile.sender.ui.MainActivity
+import com.sonara.app.model.Track
+import com.sonara.app.ui.MainActivity
 import java.io.InputStream
 
 class MediaService : Service(), AudioManager.OnAudioFocusChangeListener {

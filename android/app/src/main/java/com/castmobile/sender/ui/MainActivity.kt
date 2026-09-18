@@ -1,4 +1,4 @@
-package com.castmobile.sender.ui
+package com.sonara.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -31,8 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
-import com.castmobile.sender.model.Folder
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Folder
+import com.sonara.app.model.Track
 
 /**
  * MainActivity - Entry point

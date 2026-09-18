@@ -1,4 +1,4 @@
-package com.castmobile.sender.ui
+package com.sonara.app.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitEachGesture

@@ -1,8 +1,8 @@
-package com.castmobile.sender.dj
+package com.sonara.app.dj
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Track
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

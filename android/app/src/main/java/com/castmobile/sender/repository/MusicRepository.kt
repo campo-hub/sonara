@@ -1,11 +1,11 @@
-package com.castmobile.sender.repository
+package com.sonara.app.repository
 
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
-import com.castmobile.sender.model.Folder
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Folder
+import com.sonara.app.model.Track
 import java.io.File
 
 class MusicRepository(private val context: Context) {

@@ -1,268 +1,351 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
-const galleryCards = [
-  { id: 'splash', label: 'Splash / Loading', type: 'splash' },
-  { id: 'login', label: 'Login', type: 'login' },
-  { id: 'register', label: 'Register', type: 'register' },
-  { id: 'home', label: 'Home', type: 'home' },
-  { id: 'discover', label: 'Discover', type: 'discover' },
-  { id: 'library', label: 'Library', type: 'library' },
-  { id: 'album', label: 'Album / Folder', type: 'album' },
-  { id: 'playlist', label: 'Playlist', type: 'playlist' },
-  { id: 'player', label: 'Full Player', type: 'player' },
-  { id: 'dj', label: 'DJ Mode', type: 'dj' },
-  { id: 'appearance', label: 'Appearance Lab', type: 'appearance' },
-  { id: 'equalizer', label: 'Equalizer', type: 'equalizer' },
-  { id: 'sleep', label: 'Sleep Timer', type: 'sleep' },
-  { id: 'options', label: 'Song Options', type: 'options' },
-  { id: 'settings', label: 'Settings', type: 'settings' },
-  { id: 'dashboard', label: 'Admin', type: 'dashboard' }
+const navItems = [
+  { label: 'Home', active: false },
+  { label: 'Library', active: false },
+  { label: 'All Music', active: true },
+  { label: 'Lab', active: false },
+  { label: 'Playlists', active: false },
+  { label: 'Favorites', active: false },
+  { label: 'John\'s playlist', active: false }
 ];
 
-const playlistNames = ['Chill Collection', 'Workout', 'Favorites', 'Night Drive'];
-const recentTracks = [
-  { title: 'Neon', artist: 'Luma' },
-  { title: 'Wild Echo', artist: 'Aster' },
-  { title: 'Glass Sky', artist: 'Nova' },
-  { title: 'Midnight', artist: 'Mira' }
+const adminItems = [
+  { label: 'Dashboard', active: false },
+  { label: 'Songs', active: false },
+  { label: 'Albums', active: false },
+  { label: 'Artists', active: false },
+  { label: 'Upload', active: true },
+  { label: 'Users', active: false },
+  { label: 'Settings', active: false }
 ];
 
-function formatTime(totalSeconds) {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
+const uploads = [
+  { title: 'Dimension (feat. Skepta & Rema)', artist: 'JAE, Skepta, Rema', duration: '3:54', status: 'Uploaded' },
+  { title: 'Good Days', artist: 'SZA', duration: '4:38', status: 'Uploaded' },
+  { title: 'Kesho', artist: 'Bensoul', duration: '3:20', status: 'Uploading...', progress: 72 },
+  { title: 'Nimkeuzoea', artist: 'Rosa Ree', duration: '3:45', status: 'Queued' }
+];
+
+const guideItems = [
+  'Supported formats: MP3, M4A, FLAC, WAV',
+  'Maximum file size: 100 MB per file',
+  'Use high-quality audio (320 kbps recommended)',
+  'Cover art should be square (1:1 ratio)',
+  'Make sure you have the rights to upload this content'
+];
+
+const metadataRows = [
+  ['Title', 'Language'],
+  ['Artist', 'Cover Art'],
+  ['Album', 'Lyrics (optional)'],
+  ['Genre', 'ISRC (optional)'],
+  ['Year', 'Composer (optional)'],
+  ['Duration', 'Label (optional)']
+];
 
 export default function App() {
-  const [songs, setSongs] = useState([]);
-  const [selectedSong, setSelectedSong] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [progress, setProgress] = useState(82);
+  const [activeTab, setActiveTab] = useState('track');
+  const [audioFileName, setAudioFileName] = useState('Select audio files or folder');
+  const [coverName, setCoverName] = useState('Upload cover art');
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [selectedAudioFiles, setSelectedAudioFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState('');
-  const fileInputRef = useRef(null);
+  const audioInputRef = useRef(null);
+  const coverInputRef = useRef(null);
 
-  const activeTrack = useMemo(() => {
-    if (!selectedSong) return 0.72;
-    return selectedSong.duration ? Math.min(progress / selectedSong.duration, 1) : 0.72;
-  }, [progress, selectedSong]);
+  const updateAudioSelection = (files) => {
+    const validAudioFiles = Array.from(files || []).filter((file) => {
+      const candidate = file.name || '';
+      return file.type.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac)$/i.test(candidate);
+    });
 
-  useEffect(() => {
-    const demoSongs = [
-      { id: '1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: 205, cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=600&q=80' },
-      { id: '2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: 248, cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=600&q=80' },
-      { id: '3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: 222, cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=600&q=80' },
-      { id: '4', title: 'Afterglow', artist: 'Mira Bloom', album: 'Slow Burn', duration: 196, cover: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=600&q=80' }
-    ];
+    if (!validAudioFiles.length) {
+      setUploadMessage('No supported audio files were selected.');
+      setSelectedAudioFiles([]);
+      setAudioFileName('Select audio files or folder');
+      return;
+    }
 
-    setSongs(demoSongs);
-    setSelectedSong(demoSongs[0]);
-  }, []);
+    setSelectedAudioFiles(validAudioFiles);
+    setAudioFileName(
+      validAudioFiles.length > 1
+        ? `${validAudioFiles.length} tracks selected`
+        : validAudioFiles[0].name
+    );
+    setUploadMessage(
+      validAudioFiles.length > 1
+        ? `${validAudioFiles.length} tracks ready for bulk import.`
+        : 'Audio ready for upload.'
+    );
+  };
 
-  useEffect(() => {
-    if (!selectedSong) return;
-
-    const timer = setInterval(() => {
-      setProgress((current) => {
-        if (!isPlaying) return current;
-        const next = current + 1;
-        return next >= selectedSong.duration ? selectedSong.duration : next;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [selectedSong, isPlaying]);
-
-  const handleBulkUpload = async (event) => {
+  const handleFiles = (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
 
-    setIsUploading(true);
-    setUploadStatus('Preparing album import...');
+    if (event.target === audioInputRef.current) {
+      updateAudioSelection(files);
+    }
 
-    const form = new FormData();
-    files.forEach((file) => form.append('files', file, file.webkitRelativePath || file.name));
+    if (event.target === coverInputRef.current) {
+      const file = files[0];
+      setCoverName(file?.name || 'Upload cover art');
+      setUploadMessage('Cover art ready for upload.');
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedAudioFiles.length) {
+      setUploadMessage('Choose audio files or a folder before uploading.');
+      return;
+    }
+
+    const formData = new FormData();
+    selectedAudioFiles.forEach((file) => {
+      formData.append('files', file, file.webkitRelativePath || file.name);
+    });
+
+    const coverFile = coverInputRef.current?.files?.[0];
+    if (coverFile) {
+      formData.append('cover', coverFile, coverFile.name);
+    }
+
+    setIsUploading(true);
+    setUploadMessage('Uploading to Sonara...');
 
     try {
-      const res = await fetch(`${apiBase}/uploads/bulk`, { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Upload failed');
-      setUploadStatus(`${data.tracks?.length || files.length} tracks imported to the library.`);
-      if (data.tracks?.[0]) setSelectedSong(data.tracks[0]);
+      const response = await fetch(`${apiBase}/uploads/bulk`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Upload failed');
+      setUploadMessage(`${data.tracks?.length || selectedAudioFiles.length} track${data.tracks?.length === 1 ? '' : 's'} queued for import.`);
+      setSelectedAudioFiles([]);
+      setAudioFileName('Select audio files or folder');
     } catch (error) {
-      setUploadStatus(error.message || 'Import failed.');
+      setUploadMessage(error.message || 'Unable to upload right now.');
     } finally {
       setIsUploading(false);
-      event.target.value = '';
     }
   };
 
   return (
-    <div className="all-pages-shell">
-      <header className="pages-header glass-panel">
-        <div className="brand-lockup">
-          <div className="brand-mark">S</div>
-          <div>
-            <span className="brand-sub">all pages / screen set</span>
-            <h1>SONARA</h1>
+    <div className="sonara-app-shell">
+      <div className="browser-window">
+        <div className="browser-toolbar">
+          <div className="traffic-lights">
+            <span className="light red" />
+            <span className="light yellow" />
+            <span className="light green" />
+          </div>
+
+          <div className="address-pill">
+            <span className="domain-dot" />
+            <span>sonara.app</span>
+          </div>
+
+          <div className="toolbar-actions">
+            <span className="toolbar-icon">⌕</span>
+            <span className="toolbar-icon">◌</span>
+            <span className="toolbar-icon">⎈</span>
           </div>
         </div>
-        <div className="header-actions">
-          <span>mobile + desktop</span>
-          <button>View system</button>
-        </div>
-      </header>
 
-      <main className="pages-board">
-        <article className="page-card intro-card glass-panel">
-          <div className="page-card-header">splash / loading</div>
-          <div className="brand-orbit">
-            <span className="orbit large" />
-            <span className="orbit mid" />
-            <span className="orbit core" />
-          </div>
-          <div className="page-title">SONARA</div>
-        </article>
-
-        <article className="page-card auth-card glass-panel">
-          <div className="page-card-header">login</div>
-          <div className="field-stack">
-            <span className="field line" />
-            <span className="field line short" />
-            <span className="action-pill" />
-          </div>
-        </article>
-
-        <article className="page-card auth-card glass-panel">
-          <div className="page-card-header">register</div>
-          <div className="field-stack">
-            <span className="field line" />
-            <span className="field line" />
-            <span className="field line short" />
-            <span className="action-pill" />
-          </div>
-        </article>
-
-        <article className="page-card home-card glass-panel">
-          <div className="page-card-header">home</div>
-          <div className="home-head">
-            <span>Good evening</span>
-            <span className="tiny-pill">DJ</span>
-          </div>
-          <div className="home-visual">
-            <span className="visual-core" />
-            <span className="visual-ring" />
-          </div>
-          <div className="chip-row">
-            {playlistNames.map((item, index) => (
-              <span key={item} className={index % 2 ? 'chip soft' : 'chip'}>{item}</span>
-            ))}
-          </div>
-        </article>
-
-        <article className="page-card discover-card glass-panel">
-          <div className="page-card-header">discover</div>
-          <div className="tile-grid">
-            <span className="tile magenta" />
-            <span className="tile purple" />
-            <span className="tile blue" />
-            <span className="tile cyan" />
-          </div>
-        </article>
-
-        <article className="page-card library-card glass-panel">
-          <div className="page-card-header">library</div>
-          <div className="lib-tabs">
-            <span>All</span>
-            <span>Playlist</span>
-            <span>Artist</span>
-          </div>
-          <div className="lib-list">
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
-
-        <article className="page-card album-card glass-panel">
-          <div className="page-card-header">album / folder</div>
-          <div className="album-inline">
-            <span className="art-cover" />
-            <div>
-              <strong>Chill Collection</strong>
-              <small>42 tracks · 2h 41m</small>
+        <div className="app-layout">
+          <aside className="sidebar">
+            <div className="sidebar-brand">
+              <span className="brand-wave" />
+              <span>Sonara</span>
             </div>
-          </div>
-          <div className="track-lines">
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
 
-        <article className="page-card playlist-card glass-panel">
-          <div className="page-card-header">playlist</div>
-          <div className="audio-list">
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
+            <nav className="nav-stack" aria-label="Main navigation">
+              {navItems.map((item) => (
+                <button key={item.label} className={`nav-item ${item.active ? 'active' : ''}`} type="button">
+                  <span className="nav-icon" />
+                  {item.label}
+                </button>
+              ))}
+            </nav>
 
-        <article className="page-card player-card glass-panel">
-          <div className="page-card-header">full player</div>
-          <div className="player-art" />
-          <div className="track-bar" />
-          <div className="transport-buttons">
-            <span />
-            <span className="center" />
-            <span />
-          </div>
-        </article>
+            <div className="sidebar-section">
+              <p>Admin</p>
+              <div className="nav-stack small-stack">
+                {adminItems.map((item) => (
+                  <button key={item.label} className={`nav-item ${item.active ? 'active' : ''}`} type="button">
+                    <span className="nav-icon" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <article className="page-card dj-card glass-panel">
-          <div className="page-card-header">dj mode</div>
-          <div className="dj-ring-shell">
-            <span className="dj-ring one" />
-            <span className="dj-ring two" />
-          </div>
-          <div className="two-pills">
-            <span>Chill</span>
-            <span>Queue</span>
-          </div>
-        </article>
+            <div className="player-card-fixed">
+              <div className="mini-cover" />
+              <div className="mini-meta">
+                <strong>Dimension (feat. Skepta &amp; Rema)</strong>
+                <span>JAE, Skepta, Rema</span>
+              </div>
+            </div>
+          </aside>
 
-        <article className="page-card settings-card glass-panel">
-          <div className="page-card-header">appearance lab</div>
-          <div className="swatch-row">
-            <span className="swatch purple" />
-            <span className="swatch cyan" />
-            <span className="swatch magenta" />
-          </div>
-        </article>
+          <main className="workspace">
+            <header className="workspace-header">
+              <div className="workspace-topline">
+                <span>Admin</span>
+                <button type="button">Upload</button>
+              </div>
+              <h1>Upload Music</h1>
+              <p>Add new songs, albums and artists to your Sonara collection.</p>
+            </header>
 
-        <article className="page-card equalizer-card glass-panel">
-          <div className="page-card-header">equalizer</div>
-          <div className="bar-graph">
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </article>
+            <section className="content-grid">
+              <div className="upload-column">
+                <div className="dropzone" onClick={() => audioInputRef.current?.click()}>
+                  <input
+                    ref={audioInputRef}
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.flac,.m4a,.aac"
+                    multiple
+                    onChange={handleFiles}
+                    webkitdirectory=""
+                    directory=""
+                    hidden
+                  />
+                  <div className="drop-icon">↑</div>
+                  <div className="drop-text">
+                    <span>Drag and drop your files here</span>
+                    <small>or click to browse</small>
+                  </div>
+                  <div className="drop-meta">MP3, M4A, FLAC, WAV · Max 100 MB per file</div>
+                </div>
 
-        <article className="page-card upload-card glass-panel">
-          <div className="page-card-header">bulk upload</div>
-          <div className="upload-box">
-            <span className="upload-badge">drop folder</span>
-            <span className="upload-button">choose folder</span>
-          </div>
-        </article>
-      </main>
+                <div className="tab-switcher" role="tablist" aria-label="Upload type tabs">
+                  <button type="button" className={activeTab === 'track' ? 'active' : ''} onClick={() => setActiveTab('track')}>Track</button>
+                  <button type="button" className={activeTab === 'album' ? 'active' : ''} onClick={() => setActiveTab('album')}>Album</button>
+                  <button type="button" className={activeTab === 'artist' ? 'active' : ''} onClick={() => setActiveTab('artist')}>Artist</button>
+                </div>
+
+                <div className="form-grid">
+                  <label className="field-block">
+                    <span>Song title *</span>
+                    <input type="text" placeholder="e.g. Dimension" />
+                  </label>
+
+                  <label className="field-block">
+                    <span>Artist *</span>
+                    <input type="text" placeholder="e.g. JAE" />
+                  </label>
+
+                  <div className="art-block">
+                    <button type="button" className="cover-button" onClick={() => coverInputRef.current?.click()}>
+                      <span className="cover-icon">◧</span>
+                      <span>{coverName}</span>
+                    </button>
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFiles}
+                      hidden
+                    />
+                  </div>
+
+                  <label className="field-block">
+                    <span>Genre</span>
+                    <input type="text" placeholder="e.g. Dimension" />
+                  </label>
+
+                  <label className="field-block">
+                    <span>Year</span>
+                    <input type="text" placeholder="e.g. 2024" />
+                  </label>
+
+                  <label className="field-block">
+                    <span>Duration (optional)</span>
+                    <input type="text" placeholder="e.g. 3:54" />
+                  </label>
+
+                  <label className="field-block">
+                    <span>Language</span>
+                    <select defaultValue="">
+                      <option value="" disabled>Select language</option>
+                      <option>English</option>
+                      <option>Spanish</option>
+                      <option>French</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="audio-upload-row">
+                  <div className="audio-file-picker">
+                    <span className="mini-note">Audio file *</span>
+                    <button type="button" onClick={() => audioInputRef.current?.click()}>
+                      <span className="music-icon">♫</span>
+                      {audioFileName}
+                    </button>
+                  </div>
+                </div>
+
+                {uploadMessage && <div className="upload-toast">{uploadMessage}</div>}
+
+                <button type="button" className="primary-upload-button" onClick={handleUpload} disabled={isUploading}>
+                  <span>↑</span>
+                  {isUploading ? 'Uploading...' : 'Upload Track(s)'}
+                </button>
+              </div>
+
+              <aside className="right-panel">
+                <div className="info-box guide-box">
+                  <h2>Upload Guidelines</h2>
+                  <ul>
+                    {guideItems.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="info-box recent-box">
+                  <div className="box-header">
+                    <h2>Recent Uploads</h2>
+                    <button type="button">View all</button>
+                  </div>
+
+                  {uploads.map((song) => (
+                    <div key={song.title} className="upload-row">
+                      <div className="row-cover" />
+                      <div className="row-meta">
+                        <strong>{song.title}</strong>
+                        <span>{song.artist}</span>
+                      </div>
+                      <div className="row-status">
+                        <span>{song.duration}</span>
+                        <em>{song.status}</em>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="info-box metadata-box">
+                  <h2>Supported Metadata</h2>
+                  <div className="metadata-grid">
+                    {metadataRows.map((row) => (
+                      <div key={row.join('-')} className="metadata-row">
+                        {row.map((cell) => (
+                          <span key={cell}>{cell}</span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+            </section>
+          </main>
+        </div>
+      </div>
     </div>
   );
 }

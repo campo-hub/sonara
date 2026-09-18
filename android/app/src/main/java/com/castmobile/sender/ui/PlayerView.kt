@@ -1,4 +1,4 @@
-package com.castmobile.sender.ui
+package com.sonara.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Track
 import kotlin.math.*
 
 /**

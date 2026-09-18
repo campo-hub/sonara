@@ -1,4 +1,4 @@
-package com.castmobile.sender.ui
+package com.sonara.app.ui
 
 import android.app.Application
 import android.content.Context

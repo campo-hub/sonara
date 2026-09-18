@@ -1,6 +1,6 @@
-package com.castmobile.sender.dj
+package com.sonara.app.dj
 
-import com.castmobile.sender.model.Track
+import com.sonara.app.model.Track
 import java.util.Calendar
 import kotlin.math.abs
 
