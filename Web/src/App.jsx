@@ -22,29 +22,6 @@ const adminItems = [
   { id: 'settings', label: 'Settings' }
 ];
 
-const uploads = [
-  { title: 'Dimension (feat. Skepta & Rema)', artist: 'JAE, Skepta, Rema', duration: '3:54', status: 'Uploaded' },
-  { title: 'Good Days', artist: 'SZA', duration: '4:38', status: 'Uploaded' },
-  { title: 'Kesho', artist: 'Bensoul', duration: '3:20', status: 'Uploading...', progress: 72 },
-  { title: 'Nimkeuzoea', artist: 'Rosa Ree', duration: '3:45', status: 'Queued' }
-];
-
-const guideItems = [
-  'Supported formats: MP3, M4A, FLAC, WAV',
-  'Maximum file size: 100 MB per file',
-  'Use high-quality audio (320 kbps recommended)',
-  'Cover art should be square (1:1 ratio)',
-  'Make sure you have the rights to upload this content'
-];
-
-const metadataRows = [
-  ['Title', 'Language'],
-  ['Artist', 'Cover Art'],
-  ['Album', 'Lyrics (optional)'],
-  ['Genre', 'ISRC (optional)'],
-  ['Year', 'Composer (optional)'],
-  ['Duration', 'Label (optional)']
-];
 
 const pageTitles = {
   home: 'Home',
@@ -91,10 +68,24 @@ export default function App() {
   const audioInputRef = useRef(null);
   const coverInputRef = useRef(null);
 
+  const isAudioFileCandidate = (file) => {
+    const candidate = (file?.name || '').toLowerCase();
+    const mimeType = (file?.type || '').toLowerCase();
+    const normalized = candidate.replace(/\\/g, '/');
+
+    return mimeType.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac|ogg|opus|wma)$/i.test(normalized);
+  };
+
   const updateAudioSelection = (files) => {
     const validAudioFiles = Array.from(files || []).filter((file) => {
-      const candidate = file.name || '';
-      return file.type?.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac)$/i.test(candidate);
+      if (!file) return false;
+
+      if (isAudioFileCandidate(file)) {
+        return true;
+      }
+
+      const relativePath = (file.webkitRelativePath || file.name || '').toLowerCase();
+      return /\.(mp3|wav|flac|m4a|aac|ogg|opus|wma)$/i.test(relativePath);
     });
 
     if (!validAudioFiles.length) {
@@ -172,11 +163,6 @@ export default function App() {
     if (activeSection !== 'upload') {
       return (
         <div className="placeholder-page">
-          <div className="placeholder-head">
-            <h2>{pageTitles[activeSection] || 'Page'}</h2>
-            <span>{pageInfo.subtitle}</span>
-          </div>
-
           <div className="placeholder-grid">
             {pageInfo.cards.map((card) => (
               <div key={card} className="placeholder-card">
@@ -250,43 +236,30 @@ export default function App() {
           <div className="info-box guide-box">
             <h2>Upload Guidelines</h2>
             <ul>
-              {guideItems.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
+              <li>Drop individual tracks or an entire album folder.</li>
+              <li>Artwork is detected automatically from the uploaded files.</li>
+              <li>Supported audio formats: MP3, M4A, FLAC, WAV, OGG, OPUS.</li>
             </ul>
           </div>
 
           <div className="info-box recent-box">
             <div className="box-header">
               <h2>Recent Uploads</h2>
-              <button type="button">View all</button>
             </div>
-
-            {uploads.map((song) => (
-              <div key={song.title} className="upload-row">
-                <div className="row-cover" />
-                <div className="row-meta">
-                  <strong>{song.title}</strong>
-                  <span>{song.artist}</span>
-                </div>
-                <div className="row-status">
-                  <span>{song.duration}</span>
-                  <em>{song.status}</em>
-                </div>
-              </div>
-            ))}
+            <p className="empty-state-text">No recent uploads yet.</p>
           </div>
 
           <div className="info-box metadata-box">
-            <h2>Supported Metadata</h2>
+            <h2>Upload Notes</h2>
             <div className="metadata-grid">
-              {metadataRows.map((row) => (
-                <div key={row.join('-')} className="metadata-row">
-                  {row.map((cell) => (
-                    <span key={cell}>{cell}</span>
-                  ))}
-                </div>
-              ))}
+              <div className="metadata-row">
+                <span>Auto-detect</span>
+                <span>Album art</span>
+              </div>
+              <div className="metadata-row">
+                <span>Bulk import</span>
+                <span>Folder upload</span>
+              </div>
             </div>
           </div>
         </aside>
