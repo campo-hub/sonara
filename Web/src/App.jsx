@@ -1065,7 +1065,6 @@ export default function App() {
       if (!track.src || track.seconds > 0) return;
       const audio = new Audio();
       audio.preload = 'metadata';
-      audio.crossOrigin = 'anonymous';
       audio.onloadedmetadata = () => {
         if (!active || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
         setDurationOverrides((previous) => ({ ...previous, [track.id]: audio.duration }));
