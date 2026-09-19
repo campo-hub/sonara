@@ -13,3 +13,5 @@ services:
         value: 10000
       - key: CORS_ORIGIN
         value: https://campo-hub.github.io,https://campo-hub.github.io/sonara
+      - key: R2_PUBLIC_BASE_URL
+        value: https://pub-de00b21f1e9743ce91e7947956335a70.r2.dev

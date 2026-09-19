@@ -7,13 +7,6 @@ const navItems = [
   { id: 'upload', label: 'Upload' }
 ];
 
-const starterTracks = [
-  { id: 'track-1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: '3:25', cover: '#ff5ad9', audioUrl: '' },
-  { id: 'track-2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: '4:08', cover: '#7e68ff', audioUrl: '' },
-  { id: 'track-3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: '3:42', cover: '#59d8ff', audioUrl: '' },
-  { id: 'track-4', title: 'Afterhours', artist: 'Mira Sol', album: 'Dusk Signals', duration: '4:21', cover: '#84f1d4', audioUrl: '' }
-];
-
 const pageTitles = {
   home: 'Home',
   upload: 'Upload Music'
@@ -33,19 +26,24 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [catalog, setCatalog] = useState([]);
   const [recentUploads, setRecentUploads] = useState([]);
+  const [catalogMessage, setCatalogMessage] = useState('Loading your library...');
   const audioInputRef = useRef(null);
 
   const fetchCatalog = async () => {
     try {
       const response = await fetch(`${apiBase}/catalog`);
-      if (!response.ok) return;
+      if (!response.ok) {
+        throw new Error(`Catalog request failed (${response.status})`);
+      }
 
       const payload = await response.json();
       const songs = Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : [];
       setCatalog(songs);
       setRecentUploads(songs.slice(0, 4));
+      setCatalogMessage(songs.length ? '' : 'No uploaded music yet. Use Upload to add your first track.');
     } catch (error) {
       console.error('Unable to load catalog', error);
+      setCatalogMessage('Unable to load the live library. Check the backend connection and try again.');
     }
   };
 
@@ -64,7 +62,7 @@ export default function App() {
       audioUrl: item.audioUrl || ''
     }));
 
-    return [...starterTracks, ...bucketTracks];
+    return bucketTracks;
   }, [catalog]);
 
   useEffect(() => {
@@ -195,7 +193,7 @@ export default function App() {
           <button type="button" onClick={() => setActiveView('upload')}>Add music</button>
         </div>
         <div className="track-list">
-          {allTracks.map((track) => (
+          {allTracks.length ? allTracks.map((track) => (
             <button
               type="button"
               key={track.id}
@@ -211,7 +209,7 @@ export default function App() {
               <span className="track-meta-small">{track.duration}</span>
               <span className="play-button">▶</span>
             </button>
-          ))}
+          )) : <p className="empty-state-text">{catalogMessage}</p>}
         </div>
       </div>
     </>

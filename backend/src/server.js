@@ -150,7 +150,7 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
     album: metadata.album,
     duration: 180 + index * 8,
     cover: cover || 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
-    audioUrl: audioUrl || 'https://example.com/uploads/placeholder.mp3',
+    audioUrl: audioUrl || '',
     source: 'upload',
     status: 'ready'
   };
