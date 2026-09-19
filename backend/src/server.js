@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
 
 dotenv.config();
 
@@ -60,16 +62,21 @@ const catalog = [
 
 const uploadedTracks = [];
 
-const audioExtensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac'];
-const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-
-function isAudioFile(fileName = '') {
-  return audioExtensions.some((ext) => fileName.toLowerCase().endsWith(ext));
-}
-
-function isImageFile(fileName = '') {
-  return imageExtensions.some((ext) => fileName.toLowerCase().endsWith(ext));
-}
+const r2BucketName = process.env.R2_BUCKET_NAME || '';
+const r2AccountId = process.env.R2_ACCOUNT_ID || '';
+const r2PublicBaseUrl = process.env.R2_PUBLIC_BASE_URL || '';
+const r2Endpoint = process.env.R2_ENDPOINT || (r2AccountId ? `https://${r2AccountId}.r2.cloudflarestorage.com` : '');
+const r2Client = r2BucketName && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY
+  ? new S3Client({
+      region: process.env.R2_REGION || 'auto',
+      endpoint: r2Endpoint,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
+      },
+      forcePathStyle: false
+    })
+  : null;
 
 function cleanName(fileName = '') {
   return fileName
@@ -93,27 +100,54 @@ function parseTrackMetadata(fileName, folderPath = '') {
   };
 }
 
+function resolveUploadPath(file, fallbackDir = 'uploads') {
+  const candidatePath = file.webkitRelativePath || file.originalname || file.fieldname || 'upload';
+  return buildObjectKey(candidatePath, fallbackDir);
+}
+
+async function uploadToR2(file, key) {
+  if (!r2Client || !r2BucketName) {
+    return {
+      key,
+      url: buildPublicUrl(key, r2PublicBaseUrl)
+    };
+  }
+
+  try {
+    await r2Client.send(new PutObjectCommand({
+      Bucket: r2BucketName,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype || 'application/octet-stream'
+    }));
+
+    const finalUrl = r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}/${key}`;
+    return {
+      key,
+      url: buildPublicUrl(key, finalUrl.replace(new RegExp(`/${r2BucketName}/?$`), ''))
+    };
+  } catch (error) {
+    console.error('Cloudflare R2 upload failed:', error);
+    throw new Error(`R2 upload failed: ${error.message || 'storage unavailable'}`);
+  }
+}
+
 function detectAlbumCover(files = []) {
   const ranked = files
-    .filter((file) => isImageFile(file.originalname))
+    .filter((file) => isImageFile(file.originalname) || file.fieldname === 'cover')
     .sort((a, b) => {
       const aIsCover = /cover|front|art|folder/i.test(a.originalname) ? 1 : 0;
       const bIsCover = /cover|front|art|folder/i.test(b.originalname) ? 1 : 0;
       return bIsCover - aIsCover;
     });
 
-  if (!ranked.length) {
-    return null;
-  }
-
-  const selected = ranked[0];
-  return `data:${selected.mimetype || 'image/jpeg'};base64,${selected.buffer.toString('base64')}`;
+  return ranked[0] || null;
 }
 
-function buildUploadedTrack(file, index, cover) {
-  const path = file.originalname.replace('\\', '/');
-  const folderPath = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '';
-  const metadata = parseTrackMetadata(file.originalname.split('/').at(-1) || file.originalname, folderPath);
+function buildUploadedTrack(file, index, cover, audioUrl) {
+  const sourcePath = file.webkitRelativePath || file.originalname || 'upload';
+  const folderPath = sourcePath.includes('/') ? sourcePath.split('/').slice(0, -1).join('/') : '';
+  const metadata = parseTrackMetadata((sourcePath.split('/').at(-1) || file.originalname || 'track'), folderPath);
 
   return {
     id: `uploaded-${Date.now()}-${index}`,
@@ -122,7 +156,7 @@ function buildUploadedTrack(file, index, cover) {
     album: metadata.album,
     duration: 180 + index * 8,
     cover: cover || 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
-    audioUrl: `https://example.com/uploads/${encodeURIComponent(file.originalname)}`,
+    audioUrl: audioUrl || 'https://example.com/uploads/placeholder.mp3',
     source: 'upload',
     status: 'ready'
   };
@@ -133,7 +167,7 @@ function mergeCatalog() {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({ status: 'ok', service: 'sonara-backend' });
+  res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback' });
 });
 
 app.get('/api/catalog', (_, res) => {
@@ -161,7 +195,7 @@ app.get('/api/uploads', (_, res) => {
   res.json({ uploads: uploadedTracks });
 });
 
-app.post('/api/uploads/bulk', upload.any(), (req, res) => {
+app.post('/api/uploads/bulk', upload.any(), async (req, res) => {
   try {
     const files = Array.isArray(req.files) ? req.files : [];
     const audioFiles = files.filter((file) => isAudioFile(file.originalname));
@@ -170,8 +204,16 @@ app.post('/api/uploads/bulk', upload.any(), (req, res) => {
       return res.status(400).json({ message: 'No audio files were uploaded.' });
     }
 
-    const cover = detectAlbumCover(files);
-    const parsedTracks = audioFiles.map((file, index) => buildUploadedTrack(file, index, cover));
+    const coverFile = detectAlbumCover(files);
+    const coverUpload = coverFile
+      ? await uploadToR2(coverFile, resolveUploadPath(coverFile, 'uploads/covers'))
+      : null;
+
+    const parsedTracks = await Promise.all(audioFiles.map(async (file, index) => {
+      const objectKey = resolveUploadPath(file, 'uploads');
+      const uploadResult = await uploadToR2(file, objectKey);
+      return buildUploadedTrack(file, index, coverUpload?.url || null, uploadResult.url);
+    }));
 
     uploadedTracks.unshift(...parsedTracks);
 
@@ -179,7 +221,8 @@ app.post('/api/uploads/bulk', upload.any(), (req, res) => {
       success: true,
       uploaded: parsedTracks.length,
       album: parsedTracks[0]?.album || 'Untitled Album',
-      tracks: parsedTracks
+      tracks: parsedTracks,
+      storage: r2Client ? 'cloudflare-r2' : 'memory-fallback'
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Bulk upload failed.' });

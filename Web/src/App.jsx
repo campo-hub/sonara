@@ -189,8 +189,10 @@ export default function App() {
             <input
               ref={audioInputRef}
               type="file"
-              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac"
+              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,image/*"
               multiple
+              directory=""
+              webkitdirectory=""
               onChange={handleFiles}
               hidden
             />
