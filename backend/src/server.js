@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import admin from 'firebase-admin';
 import multer from 'multer';
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
@@ -11,6 +12,34 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+const firebaseAdminConfigured = Boolean(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
+if (firebaseAdminConfigured && !admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    })
+  });
+}
+
+async function requireAuth(req, res, next) {
+  if (!firebaseAdminConfigured) {
+    return res.status(503).json({ message: 'Authentication is not configured on the server.' });
+  }
+
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return res.status(401).json({ message: 'Sign in is required for this action.' });
+
+  try {
+    req.user = await admin.auth().verifyIdToken(token);
+    return next();
+  } catch {
+    return res.status(401).json({ message: 'Your sign-in has expired. Please sign in again.' });
+  }
+}
 
 const defaultOrigins = [
   'http://localhost:5173',
@@ -272,7 +301,7 @@ app.get('/api/uploads', async (_, res) => {
   res.json({ uploads: mergeCatalog(bucketTracks) });
 });
 
-app.post('/api/uploads/bulk', upload.any(), async (req, res) => {
+app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
   try {
     const files = Array.isArray(req.files) ? req.files : [];
     const audioFiles = files.filter((file) => isAudioFile(file.originalname));

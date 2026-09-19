@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -26,6 +27,7 @@ const navItems = [
 ];
 
 const mobileTabs = ['home', 'library', 'all-music', 'lab'];
+const protectedViews = new Set(['upload', 'playlists', 'favorites']);
 
 const pageMeta = {
   library: { title: 'Library', subtitle: 'Everything you have saved, in one place.' },
@@ -240,11 +242,12 @@ const readEntry = (entry) =>
     resolve([]);
   });
 
-const sendUpload = (formData, onProgress, run) =>
+const sendUpload = (formData, onProgress, run, token) =>
   new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     if (run) run.abort = () => request.abort();
     request.open('POST', `${apiBase}/uploads/bulk`);
+    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
     request.timeout = 15 * 60 * 1000;
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded / event.total);
@@ -555,6 +558,77 @@ function EmptyState({ icon = 'music', title, text, action }) {
   );
 }
 
+function AuthDialog({ mode, reason, onClose, onSignedIn, onModeChange }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submitEmail = async (event) => {
+    event.preventDefault();
+    setIsBusy(true);
+    setError('');
+    try {
+      const result = mode === 'register' ? await createAccountWithEmail(email, password) : await signInWithEmail(email, password);
+      onSignedIn(result.user);
+    } catch (authError) {
+      setError(authError?.message?.replace('Firebase: ', '').replace(/ \([^)]*\)\.?$/, '') || 'Authentication failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const submitGoogle = async () => {
+    setIsBusy(true);
+    setError('');
+    try {
+      const result = await signInWithGoogle();
+      onSignedIn(result.user);
+    } catch (authError) {
+      if (authError?.code !== 'auth/popup-closed-by-user') {
+        setError(authError?.message?.replace('Firebase: ', '').replace(/ \([^)]*\)\.?$/, '') || 'Google sign-in failed.');
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <button type="button" className="icon-btn auth-close" onClick={onClose} aria-label="Close sign in">
+          <Icon name="x" size={20} />
+        </button>
+        <span className="auth-kicker">Sonara account</span>
+        <h2 id="auth-title">{mode === 'register' ? 'Create your account' : 'Welcome back'}</h2>
+        <p className="auth-reason">{reason || 'Sign in to unlock this feature.'}</p>
+        {!isFirebaseConfigured && <p className="auth-error">Firebase is not configured in this build.</p>}
+        <button type="button" className="btn auth-google" onClick={submitGoogle} disabled={isBusy || !isFirebaseConfigured}>
+          Continue with Google
+        </button>
+        <div className="auth-divider"><span>or use email</span></div>
+        <form onSubmit={submitEmail}>
+          <label className="auth-field">
+            <span>Email</span>
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+          </label>
+          <label className="auth-field">
+            <span>Password</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} minLength="6" required />
+          </label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <button type="submit" className="btn btn-primary btn-wide" disabled={isBusy || !isFirebaseConfigured}>
+            {isBusy ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+        <button type="button" className="text-btn auth-switch" onClick={() => onModeChange(mode === 'register' ? 'signin' : 'register')}>
+          {mode === 'register' ? 'Already have an account? Sign in' : 'New to Sonara? Create an account'}
+        </button>
+      </section>
+    </div>
+  );
+}
+
 function TrackTable({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLike, showWaveform, showAlbum = true }) {
   const columns = ['36px', 'minmax(0, 2.4fr)'];
   if (showAlbum) columns.push('minmax(0, 1.3fr)');
@@ -856,6 +930,10 @@ export default function App() {
   const [prefs, setPrefs] = useState(loadPrefs);
   const [notice, setNotice] = useState('');
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
+  const [authReason, setAuthReason] = useState('');
 
   /* catalog + upload */
   const [catalog, setCatalog] = useState([]);
@@ -895,6 +973,8 @@ export default function App() {
   const uploadPercent = Math.floor(queueFraction(uploadQueue) * 100);
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
 
+  useEffect(() => subscribeToAuth(setAuthUser), []);
+
   const current = queue[pos] || null;
   const total = audioDuration || current?.seconds || 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
@@ -903,12 +983,20 @@ export default function App() {
 
   const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
 
+  const requireAuth = useCallback((reason) => {
+    if (authUser) return true;
+    setAuthReason(reason);
+    setAuthDialogOpen(true);
+    return false;
+  }, [authUser]);
+
   const toggleLike = useCallback((id) => {
+    if (!requireAuth('Sign in to save favorites and build your personal library.')) return;
     setPrefs((previous) => ({
       ...previous,
       liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
     }));
-  }, []);
+  }, [requireAuth]);
 
   /* ------------------------------ data ------------------------------ */
 
@@ -1122,6 +1210,7 @@ export default function App() {
   const cycleRepeat = () => setRepeat((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 
   const toggleDj = () => {
+    if (!requireAuth('Sign in to use Sonara DJ and build an adaptive listening queue.')) return;
     if (djOn) {
       setDjOn(false);
       setNotice('DJ stopped. Your queue stays as it is.');
@@ -1243,6 +1332,7 @@ export default function App() {
   };
 
   const handleUpload = async () => {
+    if (!requireAuth('Create an account to upload music to Sonara.')) return;
     if (isUploading) return;
     if (!selectedFiles.length) {
       setUploadMessage({ tone: 'error', text: 'Choose audio files or a folder before uploading.' });
@@ -1260,6 +1350,7 @@ export default function App() {
     let failed = 0;
     let streak = 0;
     let lastError = '';
+    const token = await getCurrentIdToken();
 
     setUploadMessage(null);
     setUploadQueue({
@@ -1296,7 +1387,8 @@ export default function App() {
           const data = await sendUpload(
             formData,
             (fraction) => setUploadQueue((previous) => (previous ? { ...previous, batchProgress: fraction } : previous)),
-            run
+            run,
+            token
           );
           const uploaded = (Array.isArray(data?.tracks) ? data.tracks : []).map(normalizeTrack);
           if (uploaded.length) setSessionUploads((previous) => [...uploaded, ...previous].slice(0, 50));
@@ -1360,11 +1452,13 @@ export default function App() {
   /* ------------------------------ navigation ------------------------------ */
 
   const goTo = (id) => {
+    if (protectedViews.has(id) && !requireAuth(id === 'upload' ? 'Create an account to upload music to Sonara.' : 'Sign in to access your personal music space.')) return;
     setView(id);
     setNowPlayingOpen(false);
   };
 
   const openPlaylist = (id) => {
+    if (!requireAuth('Sign in to create and manage your playlists.')) return;
     setPlaylistId(id);
     goTo('playlists');
   };
@@ -1948,6 +2042,16 @@ export default function App() {
           <button type="button" className="icon-btn topbar-upload" onClick={() => goTo('upload')} aria-label="Upload music">
             <Icon name="upload" size={20} />
           </button>
+          {authUser ? (
+            <button type="button" className="auth-account" onClick={() => signOutUser()} title={authUser.email || 'Signed in'}>
+              <span>{authUser.displayName || authUser.email?.split('@')[0] || 'Account'}</span>
+              <small>Sign out</small>
+            </button>
+          ) : (
+            <button type="button" className="btn auth-topbar" onClick={() => { setAuthReason('Sign in to unlock your personal Sonara features.'); setAuthDialogOpen(true); }}>
+              Sign in
+            </button>
+          )}
         </div>
 
         <div className="page">
@@ -2069,6 +2173,16 @@ export default function App() {
         <div className="toast" role="status">
           {notice}
         </div>
+      )}
+
+      {authDialogOpen && (
+        <AuthDialog
+          mode={authMode}
+          reason={authReason}
+          onClose={() => setAuthDialogOpen(false)}
+          onSignedIn={() => setAuthDialogOpen(false)}
+          onModeChange={setAuthMode}
+        />
       )}
     </div>
   );

@@ -15,3 +15,9 @@ services:
         value: https://campo-hub.github.io,https://campo-hub.github.io/sonara
       - key: R2_PUBLIC_BASE_URL
         value: https://pub-de00b21f1e9743ce91e7947956335a70.r2.dev
+      - key: FIREBASE_PROJECT_ID
+        value: sonara-9cdb3
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
