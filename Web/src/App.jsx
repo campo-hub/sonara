@@ -1384,6 +1384,11 @@ export default function App() {
     else setNowPlayingOpen((open) => !open);
   };
 
+  const openNowPlaying = () => {
+    if (isWide) updatePrefs({ showPanel: true });
+    else setNowPlayingOpen(true);
+  };
+
   const upNext = queue.slice(pos + 1, pos + 6).map((track, offset) => ({ track, index: pos + 1 + offset }));
   const tableProps = {
     currentId: current?.id,
@@ -1987,8 +1992,13 @@ export default function App() {
       )}
 
       <footer className="player-bar">
-        <div className="pb-track">
-          <button type="button" className="pb-open" onClick={() => !isWide && setNowPlayingOpen(true)} aria-label="Open now playing">
+        <div className="pb-track" onClick={openNowPlaying} role="button" tabIndex={current ? 0 : -1} onKeyDown={(event) => {
+          if (current && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            openNowPlaying();
+          }
+        }}>
+          <button type="button" className="pb-open" aria-label="Open now playing">
             {current ? <CoverArt track={current} size="md" /> : <span className="cover cover-md" />}
             <span className="pb-text">
               <strong>{current?.title || 'Nothing playing'}</strong>
@@ -1996,7 +2006,10 @@ export default function App() {
             </span>
           </button>
           {current && (
-            <button type="button" className={`icon-btn heart pb-heart ${likedIds.has(current.id) ? 'is-on' : ''}`} onClick={() => toggleLike(current.id)} aria-pressed={likedIds.has(current.id)} aria-label={likedIds.has(current.id) ? 'Remove from favorites' : 'Add to favorites'}>
+            <button type="button" className={`icon-btn heart pb-heart ${likedIds.has(current.id) ? 'is-on' : ''}`} onClick={(event) => {
+              event.stopPropagation();
+              toggleLike(current.id);
+            }} aria-pressed={likedIds.has(current.id)} aria-label={likedIds.has(current.id) ? 'Remove from favorites' : 'Add to favorites'}>
               <Icon name="heart" size={18} filled={likedIds.has(current.id)} />
             </button>
           )}

@@ -2187,6 +2187,13 @@ strong {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  cursor: pointer;
+}
+
+.pb-track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 10px;
 }
 
 .pb-open {
