@@ -1059,27 +1059,43 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    const mediaElements = [];
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    const tracksToProbe = rawCatalogTracks.filter((track) => track.src && track.seconds <= 0);
 
-    rawCatalogTracks.forEach((track) => {
-      if (!track.src || track.seconds > 0) return;
-      const audio = new Audio();
-      audio.preload = 'metadata';
-      audio.onloadedmetadata = () => {
-        if (!active || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
-        setDurationOverrides((previous) => ({ ...previous, [track.id]: audio.duration }));
+    const probeTrack = (track) => new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        resolve();
       };
+
+      audio.onloadedmetadata = () => {
+        if (active && Number.isFinite(audio.duration) && audio.duration > 0) {
+          setDurationOverrides((previous) => ({ ...previous, [track.id]: audio.duration }));
+        }
+        finish();
+      };
+      audio.onerror = finish;
       audio.src = track.src;
       audio.load();
-      mediaElements.push(audio);
     });
+
+    (async () => {
+      for (const track of tracksToProbe) {
+        if (!active) break;
+        await probeTrack(track);
+      }
+    })();
 
     return () => {
       active = false;
-      mediaElements.forEach((audio) => {
-        audio.onloadedmetadata = null;
-        audio.removeAttribute('src');
-      });
+      audio.onloadedmetadata = null;
+      audio.onerror = null;
+      audio.removeAttribute('src');
     };
   }, [rawCatalogTracks]);
 
