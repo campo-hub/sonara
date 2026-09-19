@@ -94,7 +94,7 @@ export default function App() {
   const updateAudioSelection = (files) => {
     const validAudioFiles = Array.from(files || []).filter((file) => {
       const candidate = file.name || '';
-      return file.type.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac)$/i.test(candidate);
+      return file.type?.startsWith('audio/') || /\.(mp3|wav|flac|m4a|aac)$/i.test(candidate);
     });
 
     if (!validAudioFiles.length) {
@@ -121,6 +121,17 @@ export default function App() {
       const file = files[0];
       setCoverName(file?.name || 'Upload cover art');
       setUploadMessage('Cover art ready for upload.');
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const droppedFiles = Array.from(event.dataTransfer?.files || []);
+    if (!droppedFiles.length) return;
+
+    updateAudioSelection(droppedFiles);
+    if (audioInputRef.current) {
+      audioInputRef.current.value = '';
     }
   };
 
@@ -185,14 +196,20 @@ export default function App() {
     return (
       <>
         <div className="upload-column">
-          <div className="dropzone" onClick={() => audioInputRef.current?.click()}>
+          <div
+            className="dropzone"
+            onClick={() => audioInputRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={handleDrop}
+          >
             <input
               ref={audioInputRef}
               type="file"
-              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,image/*"
+              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac"
               multiple
-              directory=""
-              webkitdirectory=""
               onChange={handleFiles}
               hidden
             />
