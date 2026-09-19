@@ -4,72 +4,29 @@ const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 const navItems = [
   { id: 'home', label: 'Home' },
-  { id: 'library', label: 'Library' },
-  { id: 'all-music', label: 'Discover' },
-  { id: 'playlists', label: 'Playlists' },
-  { id: 'favorites', label: 'Favorites' },
   { id: 'upload', label: 'Upload' }
 ];
 
-const defaultPlaylists = [
-  { id: 'daily-mix', name: 'Daily Mix', accent: 'linear-gradient(135deg, #ff5ad9, #7e68ff)' },
-  { id: 'focus-flow', name: 'Focus Flow', accent: 'linear-gradient(135deg, #59d8ff, #7e68ff)' },
-  { id: 'late-night', name: 'Late Night', accent: 'linear-gradient(135deg, #ff9a4d, #ff5ad9)' },
-  { id: 'uploads', name: 'Uploads', accent: 'linear-gradient(135deg, #84f1d4, #59d8ff)' }
-];
-
 const starterTracks = [
-  { id: 'track-1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: '3:25', cover: '#ff5ad9' },
-  { id: 'track-2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: '4:08', cover: '#7e68ff' },
-  { id: 'track-3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: '3:42', cover: '#59d8ff' },
-  { id: 'track-4', title: 'Afterhours', artist: 'Mira Sol', album: 'Dusk Signals', duration: '4:21', cover: '#84f1d4' },
-  { id: 'track-5', title: 'Night Shift', artist: 'Kora Lane', album: 'Soft Voltage', duration: '3:57', cover: '#ff9a4d' }
+  { id: 'track-1', title: 'Midnight Drive', artist: 'Nova Echo', album: 'Afterglow', duration: '3:25', cover: '#ff5ad9', audioUrl: '' },
+  { id: 'track-2', title: 'Velvet Static', artist: 'Aster Vale', album: 'Night Bloom', duration: '4:08', cover: '#7e68ff', audioUrl: '' },
+  { id: 'track-3', title: 'Neon Horizon', artist: 'Prism Avenue', album: 'City Lights', duration: '3:42', cover: '#59d8ff', audioUrl: '' },
+  { id: 'track-4', title: 'Afterhours', artist: 'Mira Sol', album: 'Dusk Signals', duration: '4:21', cover: '#84f1d4', audioUrl: '' }
 ];
-
-const playlistTracks = {
-  'daily-mix': [
-    { id: 'p1', title: 'Bloom', artist: 'Aster Vale', album: 'Night Bloom', time: '3:12' },
-    { id: 'p2', title: 'Run It Back', artist: 'Nova Echo', album: 'Afterglow', time: '2:58' },
-    { id: 'p3', title: 'Signal Fade', artist: 'Prism Avenue', album: 'City Lights', time: '4:14' }
-  ],
-  'focus-flow': [
-    { id: 'f1', title: 'Glass Memo', artist: 'Kora Lane', album: 'Soft Voltage', time: '3:36' },
-    { id: 'f2', title: 'Clear Drift', artist: 'Mira Sol', album: 'Dusk Signals', time: '4:02' },
-    { id: 'f3', title: 'Still Blue', artist: 'Nova Echo', album: 'Afterglow', time: '3:49' }
-  ],
-  'late-night': [
-    { id: 'l1', title: 'Slow Arcade', artist: 'Prism Avenue', album: 'City Lights', time: '4:27' },
-    { id: 'l2', title: 'Velvet Echo', artist: 'Aster Vale', album: 'Night Bloom', time: '3:21' },
-    { id: 'l3', title: 'Sunset Static', artist: 'Mira Sol', album: 'Dusk Signals', time: '4:09' }
-  ],
-  uploads: [
-    { id: 'u1', title: 'Fresh Upload', artist: 'Your library', album: 'New batch', time: '3:18' },
-    { id: 'u2', title: 'Folder Import', artist: 'Your library', album: 'Bulk drop', time: '4:01' },
-    { id: 'u3', title: 'Album Artwork', artist: 'Your library', album: 'Auto-detected', time: '3:45' }
-  ]
-};
 
 const pageTitles = {
   home: 'Home',
-  library: 'Library',
-  'all-music': 'Discover',
-  playlists: 'Playlists',
-  favorites: 'Favorites',
   upload: 'Upload Music'
 };
 
 const pageSubtitles = {
   home: 'Your daily mix is ready to roll.',
-  library: 'Everything you have saved and collected in one place.',
-  'all-music': 'Browse fresh tracks and find your next obsession.',
-  playlists: 'Curated collections built around your sound and mood.',
-  favorites: 'The songs you keep returning to.',
   upload: 'Import new tracks, albums, and whole folders in one pass.'
 };
 
 export default function App() {
   const [activeView, setActiveView] = useState('home');
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState('daily-mix');
+  const [selectedTrack, setSelectedTrack] = useState(null);
   const [audioFileName, setAudioFileName] = useState('Select audio files or folder');
   const [uploadMessage, setUploadMessage] = useState('');
   const [selectedAudioFiles, setSelectedAudioFiles] = useState([]);
@@ -103,17 +60,26 @@ export default function App() {
       artist: item.artist || 'Unknown artist',
       album: item.album || 'Single',
       duration: item.duration ? `${Math.max(1, Math.round(item.duration / 60))}:${String(Math.round(item.duration % 60)).padStart(2, '0')}` : '3:18',
-      cover: item.cover || '#59d8ff'
+      cover: item.cover || '#59d8ff',
+      audioUrl: item.audioUrl || ''
     }));
 
     return [...starterTracks, ...bucketTracks];
   }, [catalog]);
 
-  const featuredTracks = allTracks.slice(0, 3);
-  const recentLibrary = allTracks.slice(0, 4);
-  const favoriteTracks = allTracks.slice(2, 6);
-  const selectedPlaylist = defaultPlaylists.find((playlist) => playlist.id === selectedPlaylistId) || defaultPlaylists[0];
-  const activePlaylistTracks = playlistTracks[selectedPlaylistId] || playlistTracks['daily-mix'];
+  useEffect(() => {
+    if (!allTracks.length) return;
+
+    if (!selectedTrack) {
+      setSelectedTrack(allTracks[0]);
+      return;
+    }
+
+    const stillExists = allTracks.some((track) => track.id === selectedTrack.id);
+    if (!stillExists) {
+      setSelectedTrack(allTracks[0]);
+    }
+  }, [allTracks, selectedTrack]);
 
   const isAudioFileCandidate = (file) => {
     const candidate = (file?.name || '').toLowerCase();
@@ -187,7 +153,9 @@ export default function App() {
       if (!response.ok) throw new Error(data.message || 'Upload failed');
 
       const uploadedTracks = Array.isArray(data?.tracks) ? data.tracks : [];
-      if (uploadedTracks.length) setRecentUploads(uploadedTracks);
+      if (uploadedTracks.length) {
+        setRecentUploads(uploadedTracks);
+      }
 
       await fetchCatalog();
       setUploadMessage(`${data.tracks?.length || selectedAudioFiles.length} track${data.tracks?.length === 1 ? '' : 's'} uploaded successfully.`);
@@ -204,169 +172,49 @@ export default function App() {
       <div className="hero-row section-panel">
         <div className="hero-copy">
           <h2>Daily Mix</h2>
-          <p>Fresh tracks for your current mood: warm synths, low-lit drums, and midnight energy.</p>
+          <p>Fresh tracks for your current mood, ready to test and play live.</p>
         </div>
-        <button type="button" className="hero-button" onClick={() => setActiveView('all-music')}>Play now</button>
+        <button type="button" className="hero-button" onClick={() => setActiveView('upload')}>Upload</button>
       </div>
 
-      <div className="stat-row">
-        <div className="stat-card">
-          <span>Saved</span>
-          <strong>4.8k</strong>
+      <div className="section-panel player-panel">
+        <div className="now-playing">
+          <div className="player-cover" style={{ background: selectedTrack?.cover || '#59d8ff' }} />
+          <div>
+            <span className="eyebrow">Now playing</span>
+            <h3>{selectedTrack?.title || 'Pick a track'}</h3>
+            <p>{selectedTrack?.artist || 'No track selected'}</p>
+          </div>
         </div>
-        <div className="stat-card">
-          <span>Listening</span>
-          <strong>18h</strong>
-        </div>
-        <div className="stat-card">
-          <span>New</span>
-          <strong>29</strong>
-        </div>
+        <audio controls src={selectedTrack?.audioUrl || undefined} className="audio-player" />
       </div>
 
       <div className="section-panel">
         <div className="section-header">
-          <h3>Trending today</h3>
-          <button type="button" onClick={() => setActiveView('all-music')}>See all</button>
+          <h3>Library</h3>
+          <button type="button" onClick={() => setActiveView('upload')}>Add music</button>
         </div>
-        <div className="feature-grid">
-          {featuredTracks.map((track) => (
-            <div key={track.id} className="feature-card" style={{ background: `linear-gradient(135deg, ${track.cover}, rgba(10,18,24,0.88))` }}>
-              {track.title}
-            </div>
+        <div className="track-list">
+          {allTracks.map((track) => (
+            <button
+              type="button"
+              key={track.id}
+              className={`track-row ${selectedTrack?.id === track.id ? 'selected' : ''}`}
+              onClick={() => setSelectedTrack(track)}
+            >
+              <div className="track-cover" style={{ background: track.cover }} />
+              <div className="track-copy">
+                <strong>{track.title}</strong>
+                <span>{track.artist}</span>
+              </div>
+              <span className="track-meta-small">{track.album}</span>
+              <span className="track-meta-small">{track.duration}</span>
+              <span className="play-button">▶</span>
+            </button>
           ))}
         </div>
       </div>
     </>
-  );
-
-  const renderLibrary = () => (
-    <div className="section-panel">
-      <div className="section-header">
-        <h3>Your library</h3>
-        <button type="button" onClick={() => setActiveView('playlists')}>Manage</button>
-      </div>
-      <div className="track-list">
-        {recentLibrary.map((track) => (
-          <div key={track.id} className="track-row">
-            <div className="track-cover" style={{ background: track.cover }} />
-            <div className="track-copy">
-              <strong>{track.title}</strong>
-              <span>{track.artist}</span>
-            </div>
-            <span className="track-meta-small">{track.album}</span>
-            <span className="track-meta-small">{track.duration}</span>
-            <button type="button" className="play-button">▶</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderDiscover = () => (
-    <div className="section-panel">
-      <div className="section-header">
-        <h3>Explore</h3>
-        <button type="button" onClick={() => setActiveView('favorites')}>Your taste</button>
-      </div>
-      <div className="track-list">
-        {allTracks.slice(0, 6).map((track) => (
-          <div key={track.id} className="track-row">
-            <div className="track-cover" style={{ background: track.cover }} />
-            <div className="track-copy">
-              <strong>{track.title}</strong>
-              <span>{track.artist}</span>
-            </div>
-            <span className="track-meta-small">{track.album}</span>
-            <span className="track-meta-small">{track.duration}</span>
-            <button type="button" className="play-button">▶</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderFavorites = () => (
-    <div className="section-panel">
-      <div className="section-header">
-        <h3>Favorites</h3>
-        <button type="button" onClick={() => setActiveView('home')}>Back home</button>
-      </div>
-      <div className="track-list">
-        {favoriteTracks.map((track) => (
-          <div key={track.id} className="track-row">
-            <div className="track-cover" style={{ background: track.cover }} />
-            <div className="track-copy">
-              <strong>{track.title}</strong>
-              <span>{track.artist}</span>
-            </div>
-            <span className="track-meta-small">{track.album}</span>
-            <span className="track-meta-small">{track.duration}</span>
-            <button type="button" className="play-button">♥</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderPlaylists = () => (
-    <div className="playlist-layout">
-      <aside className="playlist-sidebar">
-        <h3>Playlists</h3>
-        <div className="playlist-list-compact">
-          {defaultPlaylists.map((playlist) => (
-            <button
-              key={playlist.id}
-              type="button"
-              className={`playlist-list-item ${selectedPlaylistId === playlist.id ? 'active' : ''}`}
-              onClick={() => setSelectedPlaylistId(playlist.id)}
-            >
-              <span className="playlist-dot" style={{ background: playlist.accent }} />
-              {playlist.name}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <div className="playlist-main">
-        <div className="playlist-header">
-          <div className="playlist-header-card">
-            <div className="playlist-cover" style={{ background: selectedPlaylist.accent }} />
-            <div>
-              <h4>{selectedPlaylist.name}</h4>
-              <p>{activePlaylistTracks.length} tracks • curated</p>
-            </div>
-          </div>
-          <div className="playlist-actions">
-            <button type="button" className="pill-button">Shuffle</button>
-            <button type="button" className="pill-button">Play</button>
-          </div>
-        </div>
-
-        <div className="track-table">
-          <div className="table-row header">
-            <span>#</span>
-            <span>Title</span>
-            <span>Album</span>
-            <span>Time</span>
-            <span> </span>
-          </div>
-
-          {activePlaylistTracks.map((track, index) => (
-            <div key={track.id} className="table-row">
-              <span className="track-index">{index + 1}</span>
-              <div>
-                <div className="track-name">{track.title}</div>
-                <div className="track-meta-small">{track.artist}</div>
-              </div>
-              <span className="track-meta-small">{track.album}</span>
-              <span className="track-time">{track.time}</span>
-              <button type="button" className="play-button">▶</button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 
   const renderUpload = () => (
@@ -402,11 +250,10 @@ export default function App() {
         <div className="tab-switcher" role="tablist" aria-label="Upload type tabs">
           <button type="button" className="active">Track</button>
           <button type="button">Album</button>
-          <button type="button">Artist</button>
         </div>
 
         <div className="upload-simple-summary">
-          <p>Album art is auto-detected from your files. No manual metadata is required for the upload flow.</p>
+          <p>Upload a single track or an entire folder, then come back to Home to test playback.</p>
         </div>
 
         <div className="audio-upload-row">
@@ -429,11 +276,11 @@ export default function App() {
 
       <aside className="right-panel">
         <div className="info-box">
-          <h2>Upload guidelines</h2>
+          <h2>Upload notes</h2>
           <ul>
-            <li>Drop one track or a full album folder.</li>
-            <li>Artwork is auto-detected from the files you upload.</li>
-            <li>Bulk import keeps metadata extraction and catalog updates simple.</li>
+            <li>Drop one file or an entire folder.</li>
+            <li>Files are stored via the connected backend.</li>
+            <li>Once uploaded, the new tracks appear on Home for playback testing.</li>
           </ul>
         </div>
 
@@ -459,10 +306,6 @@ export default function App() {
 
   const pageContent = {
     home: renderHome(),
-    library: renderLibrary(),
-    'all-music': renderDiscover(),
-    playlists: renderPlaylists(),
-    favorites: renderFavorites(),
     upload: renderUpload()
   };
 
@@ -489,31 +332,11 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="sidebar-section">
-            <p>Your playlists</p>
-            <div className="playlist-list">
-              {defaultPlaylists.map((playlist) => (
-                <button
-                  key={playlist.id}
-                  type="button"
-                  className={`playlist-pill ${selectedPlaylistId === playlist.id ? 'selected' : ''}`}
-                  onClick={() => {
-                    setSelectedPlaylistId(playlist.id);
-                    setActiveView('playlists');
-                  }}
-                >
-                  <span className="playlist-dot" style={{ background: playlist.accent }} />
-                  {playlist.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="player-card-fixed">
-            <div className="mini-cover" />
+            <div className="mini-cover" style={{ background: selectedTrack?.cover || '#59d8ff' }} />
             <div className="mini-meta">
-              <strong>Dimension</strong>
-              <span>JAE • Skepta • Rema</span>
+              <strong>{selectedTrack?.title || 'Home'}</strong>
+              <span>{selectedTrack?.artist || 'Ready to play'}</span>
             </div>
           </div>
         </aside>
