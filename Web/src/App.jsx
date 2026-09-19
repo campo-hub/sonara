@@ -146,11 +146,6 @@ export default function App() {
       formData.append('files', file, file.webkitRelativePath || file.name);
     });
 
-    const coverFile = coverInputRef.current?.files?.[0];
-    if (coverFile) {
-      formData.append('cover', coverFile, coverFile.name);
-    }
-
     setIsUploading(true);
     setUploadMessage('Uploading to Sonara...');
 
@@ -210,6 +205,8 @@ export default function App() {
               type="file"
               accept="audio/*,.mp3,.wav,.flac,.m4a,.aac"
               multiple
+              webkitdirectory=""
+              directory=""
               onChange={handleFiles}
               hidden
             />
@@ -227,49 +224,8 @@ export default function App() {
             <button type="button" className={activeTab === 'artist' ? 'active' : ''} onClick={() => setActiveTab('artist')}>Artist</button>
           </div>
 
-          <div className="form-grid">
-            <label className="field-block">
-              <span>Song title *</span>
-              <input type="text" placeholder="e.g. Dimension" />
-            </label>
-
-            <label className="field-block">
-              <span>Artist *</span>
-              <input type="text" placeholder="e.g. JAE" />
-            </label>
-
-            <div className="art-block">
-              <button type="button" className="cover-button" onClick={() => coverInputRef.current?.click()}>
-                <span className="cover-icon">◧</span>
-                <span>{coverName}</span>
-              </button>
-              <input ref={coverInputRef} type="file" accept="image/*" onChange={handleFiles} hidden />
-            </div>
-
-            <label className="field-block">
-              <span>Genre</span>
-              <input type="text" placeholder="e.g. Dimension" />
-            </label>
-
-            <label className="field-block">
-              <span>Year</span>
-              <input type="text" placeholder="e.g. 2024" />
-            </label>
-
-            <label className="field-block">
-              <span>Duration (optional)</span>
-              <input type="text" placeholder="e.g. 3:54" />
-            </label>
-
-            <label className="field-block">
-              <span>Language</span>
-              <select defaultValue="">
-                <option value="" disabled>Select language</option>
-                <option>English</option>
-                <option>Spanish</option>
-                <option>French</option>
-              </select>
-            </label>
+          <div className="upload-simple-summary">
+            <p>Album art is auto-detected from your files. No manual metadata is required for the upload flow.</p>
           </div>
 
           <div className="audio-upload-row">

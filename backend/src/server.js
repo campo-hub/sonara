@@ -12,21 +12,44 @@ const port = process.env.PORT || 4000;
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const defaultOrigins = [
+  'http://localhost:5173',
+  'https://campo-hub.github.io',
+  'https://campo-hub.github.io/sonara'
+];
+
+const allowedOrigins = [...new Set([
+  ...defaultOrigins,
+  ...(process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+])];
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.some((allowed) => allowed.replace(/\/+$/, '') === normalizedOrigin)) {
       callback(null, true);
       return;
     }
 
     callback(new Error('CORS blocked for this origin'));
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.options('*', cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '50mb' }));
 
