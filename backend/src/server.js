@@ -102,20 +102,38 @@ const r2Client = r2BucketName && process.env.R2_ACCESS_KEY_ID && process.env.R2_
     })
   : null;
 
-const mongoClient = process.env.MONGODB_URI ? new MongoClient(process.env.MONGODB_URI) : null;
-const mongoDatabasePromise = mongoClient
-  ? mongoClient.connect().then((client) => client.db(process.env.MONGODB_DB_NAME || 'sonara'))
-  : Promise.resolve(null);
+const mongoClient = process.env.MONGODB_URI
+  ? new MongoClient(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+      tls: true
+    })
+  : null;
+let mongoDatabasePromise = null;
+
+async function getMongoDatabase() {
+  if (!mongoClient) return null;
+  if (!mongoDatabasePromise) {
+    mongoDatabasePromise = mongoClient.connect()
+      .then((client) => client.db(process.env.MONGODB_DB_NAME || 'sonara'))
+      .catch((error) => {
+        mongoDatabasePromise = null;
+        console.error('MongoDB connection unavailable:', error.message || error);
+        return null;
+      });
+  }
+  return mongoDatabasePromise;
+}
 
 async function getUserLibrary(userId) {
-  const database = await mongoDatabasePromise;
-  if (!database) return null;
+  const database = await getMongoDatabase();
+  if (!database) throw new Error('User library storage is unavailable. Check the MongoDB connection and Atlas network access.');
   return database.collection('userLibraries').findOne({ userId });
 }
 
 async function saveUserLibrary(userId, payload) {
-  const database = await mongoDatabasePromise;
-  if (!database) throw new Error('User library storage is not configured.');
+  const database = await getMongoDatabase();
+  if (!database) throw new Error('User library storage is unavailable. Check the MongoDB connection and Atlas network access.');
   const library = {
     userId,
     preferences: payload.preferences || {},
@@ -294,7 +312,7 @@ function mergeCatalog(bucketTracks = []) {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback', userLibrary: mongoClient ? 'mongodb' : 'memory-fallback' });
+  res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback', userLibrary: mongoClient ? 'mongodb-configured' : 'not-configured' });
 });
 
 app.get('/api/me/library', requireAuth, async (req, res) => {
