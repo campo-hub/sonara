@@ -7,6 +7,8 @@ const navItems = [
   { id: 'upload', label: 'Upload' }
 ];
 
+const uploadBatchSize = 10;
+
 const pageTitles = {
   home: 'Home',
   upload: 'Upload Music'
@@ -24,10 +26,12 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [selectedAudioFiles, setSelectedAudioFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 });
   const [catalog, setCatalog] = useState([]);
   const [recentUploads, setRecentUploads] = useState([]);
   const [catalogMessage, setCatalogMessage] = useState('Loading your library...');
   const audioInputRef = useRef(null);
+  const uploadAbortControllerRef = useRef(null);
 
   const fetchCatalog = async () => {
     try {
@@ -128,40 +132,68 @@ export default function App() {
     if (audioInputRef.current) audioInputRef.current.value = '';
   };
 
+  const cancelUpload = () => {
+    uploadAbortControllerRef.current?.abort();
+  };
+
   const handleUpload = async () => {
     if (!selectedAudioFiles.length) {
       setUploadMessage('Choose audio files or a folder before uploading.');
       return;
     }
 
-    const formData = new FormData();
-    selectedAudioFiles.forEach((file) => {
-      formData.append('files', file, file.webkitRelativePath || file.name);
-    });
-
+    const filesToUpload = [...selectedAudioFiles];
+    const totalFiles = filesToUpload.length;
+    const uploadAbortController = new AbortController();
+    uploadAbortControllerRef.current = uploadAbortController;
+    let completedFiles = 0;
     setIsUploading(true);
-    setUploadMessage('Uploading to Sonara...');
+    setUploadProgress({ completed: 0, total: totalFiles });
+    setUploadMessage(`Uploading 0/${totalFiles} tracks...`);
 
     try {
-      const response = await fetch(`${apiBase}/uploads/bulk`, {
-        method: 'POST',
-        body: formData
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Upload failed');
+      const uploadedTracks = [];
 
-      const uploadedTracks = Array.isArray(data?.tracks) ? data.tracks : [];
-      if (uploadedTracks.length) {
-        setRecentUploads(uploadedTracks);
+      for (let start = 0; start < totalFiles; start += uploadBatchSize) {
+        const batch = filesToUpload.slice(start, start + uploadBatchSize);
+        const formData = new FormData();
+        batch.forEach((file) => {
+          formData.append('files', file, file.webkitRelativePath || file.name);
+        });
+
+        const response = await fetch(`${apiBase}/uploads/bulk`, {
+          method: 'POST',
+          body: formData,
+          signal: uploadAbortController.signal
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || `Upload failed for group ${Math.floor(start / uploadBatchSize) + 1}`);
+
+        if (Array.isArray(data?.tracks)) {
+          uploadedTracks.push(...data.tracks);
+        }
+
+        completedFiles = Math.min(start + batch.length, totalFiles);
+        setUploadProgress({ completed: completedFiles, total: totalFiles });
+        setUploadMessage(`Uploading ${completedFiles}/${totalFiles} tracks...`);
       }
 
+      if (uploadedTracks.length) {
+        setRecentUploads(uploadedTracks.slice(0, 4));
+      }
       await fetchCatalog();
-      setUploadMessage(`${data.tracks?.length || selectedAudioFiles.length} track${data.tracks?.length === 1 ? '' : 's'} uploaded successfully.`);
+      setUploadMessage(`${totalFiles} track${totalFiles === 1 ? '' : 's'} uploaded successfully.`);
       clearUploadSelection();
     } catch (error) {
-      setUploadMessage(error.message || 'Unable to upload right now.');
+      if (error.name === 'AbortError') {
+        setUploadMessage(`Upload cancelled at ${completedFiles}/${totalFiles}.`);
+        setUploadProgress((current) => ({ ...current, total: totalFiles }));
+      } else {
+        setUploadMessage(error.message || 'Unable to upload right now.');
+      }
     } finally {
       setIsUploading(false);
+      uploadAbortControllerRef.current = null;
     }
   };
 
@@ -251,7 +283,11 @@ export default function App() {
         </div>
 
         <div className="upload-simple-summary">
-          <p>Upload a single track or an entire folder, then come back to Home to test playback.</p>
+          <p>
+            {selectedAudioFiles.length
+              ? `Queue ready: ${selectedAudioFiles.length} track${selectedAudioFiles.length === 1 ? '' : 's'} in ${Math.ceil(selectedAudioFiles.length / uploadBatchSize)} group${Math.ceil(selectedAudioFiles.length / uploadBatchSize) === 1 ? '' : 's'} of ${uploadBatchSize}.`
+              : 'Upload a single track or an entire folder, then come back to Home to test playback.'}
+          </p>
         </div>
 
         <div className="audio-upload-row">
@@ -266,10 +302,23 @@ export default function App() {
 
         {uploadMessage && <div className="upload-toast">{uploadMessage}</div>}
 
-        <button type="button" className="primary-upload-button" onClick={handleUpload} disabled={isUploading}>
-          <span>↑</span>
-          {isUploading ? 'Uploading...' : 'Upload Track(s)'}
-        </button>
+        {isUploading && (
+          <div className="upload-progress" aria-live="polite">
+            <div className="upload-progress-heading">
+              <strong>{uploadProgress.completed}/{uploadProgress.total}</strong>
+              <span>tracks uploaded</span>
+            </div>
+            <progress value={uploadProgress.completed} max={uploadProgress.total} />
+            <button type="button" className="cancel-upload-button" onClick={cancelUpload}>Cancel upload</button>
+          </div>
+        )}
+
+        {!isUploading && (
+          <button type="button" className="primary-upload-button" onClick={handleUpload}>
+            <span>↑</span>
+            Upload Track(s)
+          </button>
+        )}
       </div>
 
       <aside className="right-panel">
