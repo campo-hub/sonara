@@ -138,6 +138,29 @@ function detectAlbumCover(files = []) {
   return ranked[0] || null;
 }
 
+function getParentFolder(filePath = '') {
+  const normalized = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const segments = normalized.split('/').filter(Boolean);
+  return segments.length > 1 ? segments.slice(0, -1).join('/').toLowerCase() : '';
+}
+
+function buildCoverMap(files = []) {
+  const coversByFolder = new Map();
+  files
+    .filter((file) => isImageFile(file.originalname) || file.fieldname === 'cover')
+    .sort((a, b) => {
+      const aIsCover = /cover|front|art|folder/i.test(a.originalname) ? 1 : 0;
+      const bIsCover = /cover|front|art|folder/i.test(b.originalname) ? 1 : 0;
+      return bIsCover - aIsCover;
+    })
+    .forEach((file) => {
+      const folder = getParentFolder(file.webkitRelativePath || file.originalname);
+      if (!coversByFolder.has(folder)) coversByFolder.set(folder, file);
+    });
+
+  return coversByFolder;
+}
+
 function buildUploadedTrack(file, index, cover, audioUrl) {
   const sourcePath = file.webkitRelativePath || file.originalname || 'upload';
   const folderPath = sourcePath.includes('/') ? sourcePath.split('/').slice(0, -1).join('/') : '';
@@ -156,22 +179,19 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
   };
 }
 
-function buildBucketTrackFromKey(objectKey, index = 0) {
+function buildBucketTrackFromKey(objectKey, coverKey = '') {
   const normalized = String(objectKey || '').replace(/^\/+/, '');
   const segments = normalized.split('/').filter(Boolean);
   const fileName = segments.at(-1) || 'track';
   const folderPath = segments.length > 1 ? segments.slice(0, -1).join('/') : '';
   const metadata = parseTrackMetadata(fileName, folderPath);
-  const coverCandidates = ['cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg', 'folder.png'];
-  const hasCover = coverCandidates.some((candidate) => normalized.toLowerCase().includes(candidate.toLowerCase()));
-
   return {
     id: `bucket-${normalized}`,
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
     duration: 0,
-    cover: hasCover ? buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : '',
+    cover: coverKey ? buildPublicUrl(coverKey, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : '',
     audioUrl: buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`),
     source: 'bucket',
     status: 'ready'
@@ -190,12 +210,17 @@ async function loadCatalogFromBucket() {
     }));
 
     const objects = Array.isArray(response.Contents) ? response.Contents : [];
-    const audioItems = objects
-      .map((item) => item.Key)
-      .filter((key) => isAudioFile(key) || /^uploads\//i.test(key))
-      .filter((key) => isAudioFile(key));
+    const keys = objects.map((item) => item.Key).filter(Boolean);
+    const imageKeys = keys.filter((key) => isImageFile(key));
+    const audioItems = keys.filter((key) => isAudioFile(key));
 
-    return audioItems.map((key, index) => buildBucketTrackFromKey(key, index));
+    return audioItems.map((key) => {
+      const folder = getParentFolder(key);
+      const coverKey = imageKeys.find((candidate) => {
+        return getParentFolder(candidate) === folder;
+      }) || '';
+      return buildBucketTrackFromKey(key, coverKey);
+    });
   } catch (error) {
     console.error('Unable to list Cloudflare R2 catalog:', error);
     return [];
@@ -256,15 +281,27 @@ app.post('/api/uploads/bulk', upload.any(), async (req, res) => {
       return res.status(400).json({ message: 'No audio files were uploaded.' });
     }
 
-    const coverFile = detectAlbumCover(files);
-    const coverUpload = coverFile
-      ? await uploadToR2(coverFile, resolveUploadPath(coverFile, 'uploads/covers'))
-      : null;
+    const coverMap = buildCoverMap(files);
+    const fallbackCover = detectAlbumCover(files);
+    const uploadedCovers = new Map();
+
+    const getCoverUrl = async (file) => {
+      const folder = getParentFolder(file.webkitRelativePath || file.originalname);
+      const coverFile = coverMap.get(folder) || (folder ? null : fallbackCover);
+      if (!coverFile) return '';
+      const coverPath = coverFile.webkitRelativePath || coverFile.originalname;
+      const coverKey = resolveUploadPath(coverFile, 'uploads/covers');
+      if (!uploadedCovers.has(coverPath)) {
+        const coverUpload = await uploadToR2(coverFile, coverKey);
+        uploadedCovers.set(coverPath, coverUpload.url);
+      }
+      return uploadedCovers.get(coverPath);
+    };
 
     const parsedTracks = await Promise.all(audioFiles.map(async (file, index) => {
       const objectKey = resolveUploadPath(file, 'uploads');
       const uploadResult = await uploadToR2(file, objectKey);
-      return buildUploadedTrack(file, index, coverUpload?.url || null, uploadResult.url);
+      return buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url);
     }));
 
     uploadedTracks.unshift(...parsedTracks);
