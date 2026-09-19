@@ -148,8 +148,8 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
-    duration: 180 + index * 8,
-    cover: cover || 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
+    duration: 0,
+    cover: cover || '',
     audioUrl: audioUrl || '',
     source: 'upload',
     status: 'ready'
@@ -170,8 +170,8 @@ function buildBucketTrackFromKey(objectKey, index = 0) {
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
-    duration: 180 + index * 7,
-    cover: hasCover ? buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
+    duration: 0,
+    cover: hasCover ? buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : '',
     audioUrl: buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`),
     source: 'bucket',
     status: 'ready'
