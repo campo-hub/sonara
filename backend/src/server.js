@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
 
 dotenv.config();
@@ -53,36 +53,7 @@ app.options('*', cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 
-const catalog = [
-  {
-    id: '1',
-    title: 'Midnight Drive',
-    artist: 'Nova Echo',
-    album: 'Afterglow',
-    duration: 205,
-    cover: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
-  },
-  {
-    id: '2',
-    title: 'Velvet Static',
-    artist: 'Aster Vale',
-    album: 'Night Bloom',
-    duration: 248,
-    cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=800&q=80',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'
-  },
-  {
-    id: '3',
-    title: 'Neon Horizon',
-    artist: 'Prism Avenue',
-    album: 'City Lights',
-    duration: 222,
-    cover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=800&q=80',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3'
-  }
-];
-
+const catalog = [];
 const uploadedTracks = [];
 
 const r2BucketName = process.env.R2_BUCKET_NAME || '';
@@ -185,28 +156,85 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
   };
 }
 
-function mergeCatalog() {
-  return [...catalog, ...uploadedTracks];
+function buildBucketTrackFromKey(objectKey, index = 0) {
+  const normalized = String(objectKey || '').replace(/^\/+/, '');
+  const segments = normalized.split('/').filter(Boolean);
+  const fileName = segments.at(-1) || 'track';
+  const folderPath = segments.length > 1 ? segments.slice(0, -1).join('/') : '';
+  const metadata = parseTrackMetadata(fileName, folderPath);
+  const coverCandidates = ['cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg', 'folder.png'];
+  const hasCover = coverCandidates.some((candidate) => normalized.toLowerCase().includes(candidate.toLowerCase()));
+
+  return {
+    id: `bucket-${normalized}`,
+    title: metadata.title,
+    artist: metadata.artist,
+    album: metadata.album,
+    duration: 180 + index * 7,
+    cover: hasCover ? buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=80',
+    audioUrl: buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`),
+    source: 'bucket',
+    status: 'ready'
+  };
+}
+
+async function loadCatalogFromBucket() {
+  if (!r2Client || !r2BucketName) {
+    return [];
+  }
+
+  try {
+    const response = await r2Client.send(new ListObjectsV2Command({
+      Bucket: r2BucketName,
+      Prefix: 'uploads/'
+    }));
+
+    const objects = Array.isArray(response.Contents) ? response.Contents : [];
+    const audioItems = objects
+      .map((item) => item.Key)
+      .filter((key) => isAudioFile(key) || /^uploads\//i.test(key))
+      .filter((key) => isAudioFile(key));
+
+    return audioItems.map((key, index) => buildBucketTrackFromKey(key, index));
+  } catch (error) {
+    console.error('Unable to list Cloudflare R2 catalog:', error);
+    return [];
+  }
+}
+
+function mergeCatalog(bucketTracks = []) {
+  const merged = [...catalog, ...uploadedTracks, ...bucketTracks];
+  const byId = new Map();
+
+  merged.forEach((track) => {
+    if (!track || !track.id) return;
+    byId.set(track.id, track);
+  });
+
+  return [...byId.values()];
 }
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback' });
 });
 
-app.get('/api/catalog', (_, res) => {
-  res.json({ songs: mergeCatalog() });
+app.get('/api/catalog', async (_, res) => {
+  const bucketTracks = await loadCatalogFromBucket();
+  res.json({ songs: mergeCatalog(bucketTracks) });
 });
 
-app.get('/api/catalog/:id', (req, res) => {
-  const song = mergeCatalog().find((item) => item.id === req.params.id);
+app.get('/api/catalog/:id', async (req, res) => {
+  const bucketTracks = await loadCatalogFromBucket();
+  const song = mergeCatalog(bucketTracks).find((item) => item.id === req.params.id);
   if (!song) {
     return res.status(404).json({ message: 'Song not found' });
   }
   return res.json(song);
 });
 
-app.get('/api/featured', (_, res) => {
-  const songs = mergeCatalog();
+app.get('/api/featured', async (_, res) => {
+  const bucketTracks = await loadCatalogFromBucket();
+  const songs = mergeCatalog(bucketTracks);
   res.json({
     curated: [songs[0], songs[2] || songs[0]],
     trending: songs.slice(0, 6),
@@ -214,8 +242,9 @@ app.get('/api/featured', (_, res) => {
   });
 });
 
-app.get('/api/uploads', (_, res) => {
-  res.json({ uploads: uploadedTracks });
+app.get('/api/uploads', async (_, res) => {
+  const bucketTracks = await loadCatalogFromBucket();
+  res.json({ uploads: mergeCatalog(bucketTracks) });
 });
 
 app.post('/api/uploads/bulk', upload.any(), async (req, res) => {

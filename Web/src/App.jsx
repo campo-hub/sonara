@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -65,8 +65,30 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [selectedAudioFiles, setSelectedAudioFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [recentUploads, setRecentUploads] = useState([]);
   const audioInputRef = useRef(null);
   const coverInputRef = useRef(null);
+
+  const fetchCatalog = async () => {
+    try {
+      const response = await fetch(`${apiBase}/catalog`);
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+      const songs = Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : [];
+      setCatalog(songs);
+      setRecentUploads(songs.slice(0, 4));
+    } catch (error) {
+      console.error('Unable to load catalog', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchCatalog();
+  }, []);
 
   const isAudioFileCandidate = (file) => {
     const candidate = (file?.name || '').toLowerCase();
@@ -126,6 +148,18 @@ export default function App() {
     }
   };
 
+  const clearUploadSelection = () => {
+    setSelectedAudioFiles([]);
+    setAudioFileName('Select audio files or folder');
+    if (audioInputRef.current) {
+      audioInputRef.current.value = '';
+    }
+    if (coverInputRef.current) {
+      coverInputRef.current.value = '';
+    }
+    setCoverName('Upload cover art');
+  };
+
   const handleUpload = async () => {
     if (!selectedAudioFiles.length) {
       setUploadMessage('Choose audio files or a folder before uploading.');
@@ -147,9 +181,15 @@ export default function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Upload failed');
-      setUploadMessage(`${data.tracks?.length || selectedAudioFiles.length} track${data.tracks?.length === 1 ? '' : 's'} queued for import.`);
-      setSelectedAudioFiles([]);
-      setAudioFileName('Select audio files or folder');
+
+      const uploadedTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+      if (uploadedTracks.length) {
+        setRecentUploads(uploadedTracks);
+      }
+
+      await fetchCatalog();
+      setUploadMessage(`${data.tracks?.length || selectedAudioFiles.length} track${data.tracks?.length === 1 ? '' : 's'} uploaded successfully.`);
+      clearUploadSelection();
     } catch (error) {
       setUploadMessage(error.message || 'Unable to upload right now.');
     } finally {
@@ -161,14 +201,27 @@ export default function App() {
     const pageInfo = appPageContent[activeSection] || appPageContent.upload;
 
     if (activeSection !== 'upload') {
+      const displayItems = catalog.length ? catalog.slice(0, 3) : pageInfo.cards;
+
       return (
         <div className="placeholder-page">
           <div className="placeholder-grid">
-            {pageInfo.cards.map((card) => (
-              <div key={card} className="placeholder-card">
-                <span>{card}</span>
-              </div>
-            ))}
+            {displayItems.map((item) => {
+              if (typeof item === 'string') {
+                return (
+                  <div key={item} className="placeholder-card">
+                    <span>{item}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={item.id || `${item.title}-${item.artist}`} className="placeholder-card track-card">
+                  <span className="track-title">{item.title}</span>
+                  <small>{item.artist}</small>
+                </div>
+              );
+            })}
           </div>
         </div>
       );
@@ -189,7 +242,7 @@ export default function App() {
             <input
               ref={audioInputRef}
               type="file"
-              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac"
+              accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.oga,.opus,.m4b,.m4r"
               multiple
               webkitdirectory=""
               directory=""
@@ -246,7 +299,24 @@ export default function App() {
             <div className="box-header">
               <h2>Recent Uploads</h2>
             </div>
-            <p className="empty-state-text">No recent uploads yet.</p>
+
+            {recentUploads.length ? (
+              recentUploads.map((song) => (
+                <div key={song.id || `${song.title}-${song.artist}`} className="upload-row">
+                  <div className="row-cover" style={{ backgroundImage: song.cover ? `url(${song.cover})` : 'none' }} />
+                  <div className="row-meta">
+                    <strong>{song.title}</strong>
+                    <span>{song.artist}</span>
+                  </div>
+                  <div className="row-status">
+                    <span>{song.duration ? `${song.duration}s` : 'Ready'}</span>
+                    <em>{song.source === 'upload' ? 'Uploaded' : 'Ready'}</em>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="empty-state-text">No recent uploads yet.</p>
+            )}
           </div>
 
           <div className="info-box metadata-box">

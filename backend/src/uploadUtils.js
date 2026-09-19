@@ -27,9 +27,11 @@ export function buildPublicUrl(key = '', publicBaseUrl = '') {
 }
 
 export function isAudioFile(fileName = '') {
-  return ['.mp3', '.wav', '.flac', '.m4a', '.aac'].some((ext) =>
-    String(fileName).toLowerCase().endsWith(ext)
-  );
+  const name = String(fileName || '').toLowerCase();
+  return [
+    '.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus',
+    '.mp4', '.m4b', '.m4r'
+  ].some((ext) => name.endsWith(ext));
 }
 
 export function isImageFile(fileName = '') {
