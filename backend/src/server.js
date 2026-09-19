@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import admin from 'firebase-admin';
 import multer from 'multer';
+import { MongoClient } from 'mongodb';
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
 
@@ -100,6 +101,30 @@ const r2Client = r2BucketName && process.env.R2_ACCESS_KEY_ID && process.env.R2_
       forcePathStyle: false
     })
   : null;
+
+const mongoClient = process.env.MONGODB_URI ? new MongoClient(process.env.MONGODB_URI) : null;
+const mongoDatabasePromise = mongoClient
+  ? mongoClient.connect().then((client) => client.db(process.env.MONGODB_DB_NAME || 'sonara'))
+  : Promise.resolve(null);
+
+async function getUserLibrary(userId) {
+  const database = await mongoDatabasePromise;
+  if (!database) return null;
+  return database.collection('userLibraries').findOne({ userId });
+}
+
+async function saveUserLibrary(userId, payload) {
+  const database = await mongoDatabasePromise;
+  if (!database) throw new Error('User library storage is not configured.');
+  const library = {
+    userId,
+    preferences: payload.preferences || {},
+    playlists: Array.isArray(payload.playlists) ? payload.playlists : [],
+    updatedAt: new Date()
+  };
+  await database.collection('userLibraries').updateOne({ userId }, { $set: library }, { upsert: true });
+  return library;
+}
 
 function cleanName(fileName = '') {
   return fileName
@@ -269,7 +294,25 @@ function mergeCatalog(bucketTracks = []) {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback' });
+  res.json({ status: 'ok', service: 'sonara-backend', storage: r2Client ? 'cloudflare-r2' : 'memory-fallback', userLibrary: mongoClient ? 'mongodb' : 'memory-fallback' });
+});
+
+app.get('/api/me/library', requireAuth, async (req, res) => {
+  try {
+    const library = await getUserLibrary(req.user.uid);
+    return res.json({ preferences: library?.preferences || {}, playlists: library?.playlists || [] });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Unable to load your library.' });
+  }
+});
+
+app.put('/api/me/library', requireAuth, async (req, res) => {
+  try {
+    const library = await saveUserLibrary(req.user.uid, req.body || {});
+    return res.json({ preferences: library.preferences, playlists: library.playlists });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Unable to save your library.' });
+  }
 });
 
 app.get('/api/catalog', async (_, res) => {

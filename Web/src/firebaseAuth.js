@@ -49,3 +49,12 @@ export async function signOutUser() {
 export async function getCurrentIdToken() {
   return auth?.currentUser ? auth.currentUser.getIdToken() : null;
 }
+
+export async function authenticatedJsonRequest(url, options = {}) {
+  const token = await getCurrentIdToken();
+  if (!token) throw new Error('Sign in is required.');
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return fetch(url, { ...options, headers });
+}

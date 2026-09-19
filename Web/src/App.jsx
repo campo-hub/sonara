@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
+import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -928,8 +928,11 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('name');
   const [prefs, setPrefs] = useState(loadPrefs);
+  const [userPlaylists, setUserPlaylists] = useState([]);
+  const [libraryHydrated, setLibraryHydrated] = useState(false);
   const [notice, setNotice] = useState('');
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [fullPlayerOpen, setFullPlayerOpen] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
@@ -937,6 +940,7 @@ export default function App() {
 
   /* catalog + upload */
   const [catalog, setCatalog] = useState([]);
+  const [durationOverrides, setDurationOverrides] = useState({});
   const [sessionUploads, setSessionUploads] = useState([]);
   const [serverOnline, setServerOnline] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -975,11 +979,44 @@ export default function App() {
 
   useEffect(() => subscribeToAuth(setAuthUser), []);
 
+  useEffect(() => {
+    let active = true;
+    if (!authUser) {
+      setLibraryHydrated(false);
+      setUserPlaylists([]);
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const response = await authenticatedJsonRequest(`${apiBase}/me/library`);
+        if (!response.ok) throw new Error('Unable to load your saved library.');
+        const data = await response.json();
+        if (!active) return;
+        setPrefs((previous) => ({
+          ...previous,
+          ...(data.preferences || {}),
+          liked: Array.isArray(data.preferences?.liked) ? data.preferences.liked : previous.liked
+        }));
+        setUserPlaylists(Array.isArray(data.playlists) ? data.playlists : []);
+      } catch (error) {
+        console.error('Unable to hydrate user library', error);
+        if (active) setNotice('Your saved library could not be loaded.');
+      } finally {
+        if (active) setLibraryHydrated(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [authUser]);
+
   const current = queue[pos] || null;
   const total = audioDuration || current?.seconds || 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
-  const panelMode = isWide ? (prefs.showPanel ? 'docked' : null) : nowPlayingOpen ? 'overlay' : null;
+  const panelMode = fullPlayerOpen || nowPlayingOpen ? 'overlay' : isWide && prefs.showPanel ? 'docked' : null;
 
   const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
 
@@ -1018,7 +1055,39 @@ export default function App() {
     fetchCatalog();
   }, [fetchCatalog]);
 
-  const catalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
+  const rawCatalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
+
+  useEffect(() => {
+    let active = true;
+    const mediaElements = [];
+
+    rawCatalogTracks.forEach((track) => {
+      if (!track.src || track.seconds > 0) return;
+      const audio = new Audio();
+      audio.preload = 'metadata';
+      audio.crossOrigin = 'anonymous';
+      audio.onloadedmetadata = () => {
+        if (!active || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        setDurationOverrides((previous) => ({ ...previous, [track.id]: audio.duration }));
+      };
+      audio.src = track.src;
+      audio.load();
+      mediaElements.push(audio);
+    });
+
+    return () => {
+      active = false;
+      mediaElements.forEach((audio) => {
+        audio.onloadedmetadata = null;
+        audio.removeAttribute('src');
+      });
+    };
+  }, [rawCatalogTracks]);
+
+  const catalogTracks = useMemo(
+    () => rawCatalogTracks.map((track) => ({ ...track, seconds: durationOverrides[track.id] || track.seconds })),
+    [rawCatalogTracks, durationOverrides]
+  );
   const allTracks = catalogTracks;
   const trackById = useMemo(() => new Map(allTracks.map((track) => [track.id, track])), [allTracks]);
 
@@ -1029,11 +1098,11 @@ export default function App() {
 
   const playlists = useMemo(
     () =>
-      defaultPlaylists.map((playlist) => ({
+      [...defaultPlaylists, ...userPlaylists.filter((playlist) => playlist.id !== 'uploads')].map((playlist) => ({
         ...playlist,
         tracks: playlist.dynamic === 'uploads' ? catalogTracks : playlist.trackIds.map((id) => trackById.get(id)).filter(Boolean)
       })),
-    [catalogTracks, trackById]
+    [catalogTracks, trackById, userPlaylists]
   );
   const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0];
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
@@ -1074,6 +1143,14 @@ export default function App() {
       /* storage unavailable */
     }
   }, [prefs]);
+
+  useEffect(() => {
+    if (!authUser || !libraryHydrated) return;
+    authenticatedJsonRequest(`${apiBase}/me/library`, {
+      method: 'PUT',
+      body: JSON.stringify({ preferences: prefs, playlists: userPlaylists })
+    }).catch((error) => console.error('Unable to save user library', error));
+  }, [authUser, libraryHydrated, prefs, userPlaylists]);
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
@@ -1455,6 +1532,8 @@ export default function App() {
     if (protectedViews.has(id) && !requireAuth(id === 'upload' ? 'Create an account to upload music to Sonara.' : 'Sign in to access your personal music space.')) return;
     setView(id);
     setNowPlayingOpen(false);
+    setFullPlayerOpen(false);
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   };
 
   const openPlaylist = (id) => {
@@ -1474,13 +1553,20 @@ export default function App() {
   };
 
   const toggleNowPlaying = () => {
-    if (isWide) updatePrefs({ showPanel: !prefs.showPanel });
-    else setNowPlayingOpen((open) => !open);
+    if (panelMode) {
+      setNowPlayingOpen(false);
+      setFullPlayerOpen(false);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      return;
+    }
+    setFullPlayerOpen(true);
   };
 
   const openNowPlaying = () => {
-    if (isWide) updatePrefs({ showPanel: true });
-    else setNowPlayingOpen(true);
+    if (!current) return;
+    setFullPlayerOpen(true);
+    setNowPlayingOpen(false);
+    document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
   const upNext = queue.slice(pos + 1, pos + 6).map((track, offset) => ({ track, index: pos + 1 + offset }));
@@ -1998,7 +2084,7 @@ export default function App() {
 
         <nav className="nav-stack" aria-label="Main navigation">
           {navItems.map((item) => (
-            <button key={item.id} type="button" className={`nav-item ${view === item.id ? 'is-active' : ''}`} aria-current={view === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
+            <button key={item.id} type="button" className={`nav-item ${item.id === 'upload' ? 'nav-upload' : ''} ${view === item.id ? 'is-active' : ''}`} aria-current={view === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
               <Icon name={item.icon} size={19} />
               {item.label}
               {item.id === 'upload' && isUploading && <span className="nav-badge">{uploadPercent}%</span>}
@@ -2081,7 +2167,11 @@ export default function App() {
           onJump={jumpTo}
           djOn={djOn}
           onDj={toggleDj}
-          onClose={() => setNowPlayingOpen(false)}
+          onClose={() => {
+            setNowPlayingOpen(false);
+            setFullPlayerOpen(false);
+            if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+          }}
           position={position}
           total={total}
           onSeek={seekTo}
