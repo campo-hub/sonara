@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -7,8 +6,9 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 const USER_NAME = 'John';
-const STORAGE_KEY = 'sonara.web.prefs.v1';
+const STORAGE_KEY = 'sonara.web.prefs.v2';
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
+const DAY = 24 * 60 * 60 * 1000;
 
 /* Uploads run in groups so huge selections stay fast and cancellable. */
 const BATCH_OPTIONS = [5, 10, 25, 50];
@@ -27,14 +27,13 @@ const navItems = [
 ];
 
 const mobileTabs = ['home', 'library', 'all-music', 'lab'];
-const protectedViews = new Set(['upload', 'playlists', 'favorites']);
 
 const pageMeta = {
   library: { title: 'Library', subtitle: 'Everything you have saved, in one place.' },
   'all-music': { title: 'All Music', subtitle: '' },
   playlists: { title: 'Playlists', subtitle: 'Collections built around your sound and mood.' },
   favorites: { title: 'Favorites', subtitle: 'The songs you keep coming back to.' },
-  upload: { title: 'Upload music', subtitle: 'Add tracks, albums or whole folders in one pass.' },
+  upload: { title: 'Add music', subtitle: 'Bring in tracks, albums or whole folders. Big batches go in small groups.' },
   lab: { title: 'Appearance Lab', subtitle: 'Make Sonara look and feel the way you like.' }
 };
 
@@ -46,26 +45,61 @@ const sortOptions = [
 ];
 
 const accentOptions = [
-  { id: 'ivory', name: 'Ivory', dark: '#ededed', light: '#151515' },
-  { id: 'stone', name: 'Stone', dark: '#bdb6aa', light: '#6c655a' },
-  { id: 'slate', name: 'Slate', dark: '#9aabbd', light: '#4d6076' },
-  { id: 'sage', name: 'Sage', dark: '#a3b5a1', light: '#55694f' },
-  { id: 'clay', name: 'Clay', dark: '#c5a898', light: '#7b5c4b' },
-  { id: 'graphite', name: 'Graphite', dark: '#8f8f8f', light: '#3f3f3f' }
+  { id: 'poppy', name: 'Poppy', dark: '#FF6B4A', light: '#D83A22' },
+  { id: 'ochre', name: 'Ochre', dark: '#E5B04A', light: '#B7791F' },
+  { id: 'moss', name: 'Moss', dark: '#8FB07A', light: '#4D6B3F' },
+  { id: 'ink', name: 'Ink blue', dark: '#8FA9CC', light: '#2F4B6E' },
+  { id: 'teal', name: 'Teal', dark: '#6FB5AE', light: '#2F7470' },
+  { id: 'graphite', name: 'Graphite', dark: '#CFCBC0', light: '#2B2A27' }
 ];
 
 const defaultPrefs = {
-  theme: 'dark',
-  accent: 'ivory',
-  customAccent: '#bdb6aa',
+  theme: 'light',
+  accent: 'poppy',
+  customAccent: '#D83A22',
   waveforms: true,
   compact: false,
-  showPanel: true,
+  spin: true,
   volume: 0.8,
-  liked: []
+  liked: ['sample-dimension', 'sample-a-different-way', 'sample-again', 'sample-7-years']
 };
 
+/* Sample library. Replace with your own data or rely on the /catalog API. */
+const starterTracks = [
+  { id: 'sample-dimension', title: 'Dimension (feat. Skepta & Rema)', artist: 'JAE5, Skepta, Rema', seconds: 234, age: 1 },
+  { id: 'sample-a-different-way', title: 'A Different Way (with Lauv)', artist: 'DJ Snake, Lauv', seconds: 198, age: 2 },
+  { id: 'sample-again', title: 'Again', artist: 'Wande Coal', seconds: 156, age: 3 },
+  { id: 'sample-ahiurania', title: 'Ahiurania', artist: 'Nd Githuka', seconds: 350, age: 4 },
+  { id: 'sample-7-years', title: '7 Years', artist: 'Lukas Graham', seconds: 237, age: 5 },
+  { id: 'sample-3-15', title: '3:15 (Breathe)', artist: 'Russ', seconds: 184, age: 6 },
+  { id: 'sample-11th-hour', title: '11Th Hour', artist: 'Betty Bayo', seconds: 313, age: 7 }
+].map(({ age, ...track }) => ({
+  ...track,
+  album: 'Singles',
+  cover: '',
+  src: '',
+  addedAt: Date.now() - age * DAY
+}));
+
 const defaultPlaylists = [
+  {
+    id: 'daily-mix',
+    name: 'Daily Mix',
+    description: 'Fresh picks for right now',
+    trackIds: ['sample-dimension', 'sample-a-different-way', 'sample-again', 'sample-7-years']
+  },
+  {
+    id: 'focus-flow',
+    name: 'Focus Flow',
+    description: 'Steady tracks for deep work',
+    trackIds: ['sample-3-15', 'sample-7-years', 'sample-again']
+  },
+  {
+    id: 'late-night',
+    name: 'Late Night',
+    description: 'Slow and low after dark',
+    trackIds: ['sample-11th-hour', 'sample-ahiurania', 'sample-dimension']
+  },
   { id: 'uploads', name: 'Uploads', description: 'Everything you have uploaded', dynamic: 'uploads', trackIds: [] }
 ];
 
@@ -174,7 +208,7 @@ const normalizeTrack = (item, index = 0) => {
     title: item?.title || 'Untitled track',
     artist: item?.artist || 'Unknown artist',
     album: item?.album || 'Singles',
-    seconds,
+    seconds: seconds > 0 ? seconds : 198,
     cover: resolveAssetUrl(item?.cover || item?.artwork || item?.coverUrl),
     src: resolveAssetUrl(item?.audioUrl || item?.streamUrl || item?.url || item?.src || item?.fileUrl),
     addedAt: Date.parse(item?.createdAt || item?.uploadedAt || '') || Date.now() - index * 1000
@@ -242,12 +276,11 @@ const readEntry = (entry) =>
     resolve([]);
   });
 
-const sendUpload = (formData, onProgress, run, token) =>
+const sendUpload = (formData, onProgress, run) =>
   new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     if (run) run.abort = () => request.abort();
     request.open('POST', `${apiBase}/uploads/bulk`);
-    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
     request.timeout = 15 * 60 * 1000;
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded / event.total);
@@ -436,6 +469,15 @@ const ICONS = {
     </>
   ),
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  expand: (
+    <>
+      <path d="M15 3h6v6" />
+      <path d="M9 21H3v-6" />
+      <path d="m21 3-7 7" />
+      <path d="m3 21 7-7" />
+    </>
+  ),
   reset: (
     <>
       <path d="M3 12a9 9 0 1 0 3-6.7" />
@@ -467,25 +509,128 @@ function Icon({ name, size = 20, filled = false, className = '' }) {
 /*  Small building blocks                                                     */
 /* -------------------------------------------------------------------------- */
 
-function CoverArt({ track, size = 'md' }) {
+/* Earthy pigments for generated sleeves. Real artwork always wins over these. */
+const SLEEVE_PALETTES = [
+  ['#2F4B6E', '#EADBB8', '#D9A441'],
+  ['#D9A441', '#16150F', '#F3EAD3'],
+  ['#5E7B4F', '#F1E8D0', '#26251F'],
+  ['#B4533C', '#F3E6D0', '#26251F'],
+  ['#E2DAC6', '#2F4B6E', '#B4533C'],
+  ['#26251F', '#D9A441', '#EAE2CF']
+];
+
+const SCAPE_TONES = [
+  { bg: '#B4533C', fg: '#F6E9DA' },
+  { bg: '#2F4B6E', fg: '#F1E9D6' },
+  { bg: '#D9A441', fg: '#16150F' },
+  { bg: '#5E7B4F', fg: '#F1E9D6' },
+  { bg: '#E0D8C3', fg: '#16150F' },
+  { bg: '#26251F', fg: '#F1E9D6' }
+];
+
+function SleeveShapes({ pattern, colors }) {
+  const [base, a, b] = colors;
+  switch (pattern) {
+    case 0:
+      return (
+        <>
+          <circle cx="50" cy="56" r="24" fill={a} />
+          <rect x="0" y="66" width="100" height="34" fill={b} />
+        </>
+      );
+    case 1:
+      return (
+        <>
+          <path d="M14 100A36 36 0 0 1 86 100z" fill={a} />
+          <path d="M28 100A22 22 0 0 1 72 100z" fill={b} />
+          <path d="M40 100A10 10 0 0 1 60 100z" fill={base} />
+        </>
+      );
+    case 2:
+      return (
+        <>
+          {[0, 1, 2, 3, 4].map((index) => (
+            <rect key={index} x={10 + index * 18} y="0" width="9" height="100" fill={a} />
+          ))}
+          <circle cx="50" cy="50" r="20" fill={b} />
+        </>
+      );
+    case 3:
+      return (
+        <>
+          <path d="M0 0H72A72 72 0 0 1 0 72z" fill={a} />
+          <circle cx="74" cy="74" r="14" fill={b} />
+        </>
+      );
+    case 4:
+      return (
+        <>
+          <rect x="0" y="0" width="50" height="100" fill={a} />
+          <circle cx="50" cy="50" r="24" fill={b} />
+        </>
+      );
+    default:
+      return (
+        <>
+          {[0, 1, 2].flatMap((row) =>
+            [0, 1, 2].map((col) => (
+              <circle key={`${row}-${col}`} cx={22 + col * 28} cy={22 + row * 28} r={(row + col) % 2 ? 7 : 11} fill={(row + col) % 2 ? b : a} />
+            ))
+          )}
+        </>
+      );
+  }
+}
+
+function CoverArt({ track, size = 'md', round = false }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [track?.cover]);
+  const shape = round ? ' is-round' : '';
 
   if (track?.cover && !failed) {
-    return <img className={`cover cover-${size}`} src={track.cover} alt="" loading="lazy" onError={() => setFailed(true)} />;
+    return <img className={`cover cover-${size}${shape}`} src={track.cover} alt="" loading="lazy" onError={() => setFailed(true)} />;
   }
 
   const seed = hashString(track?.id || track?.title || 'sonara');
-  const bars = Array.from({ length: 9 }, (_, index) => 5 + ((seed >>> (index * 3)) & 7) * 3);
+  const colors = SLEEVE_PALETTES[(seed >>> 3) % SLEEVE_PALETTES.length];
 
   return (
-    <span className={`cover cover-${size}`} style={{ '--tone': `var(--art-${(seed % 6) + 1})` }} aria-hidden="true">
-      <svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet">
-        {bars.map((height, index) => (
-          <rect key={index} x={6.3 + index * 4.4} y={24 - height / 2} width="2.6" height={height} rx="1.3" />
-        ))}
+    <span className={`cover cover-${size}${shape}`} aria-hidden="true">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+        <rect width="100" height="100" fill={colors[0]} />
+        <SleeveShapes pattern={seed % 6} colors={colors} />
       </svg>
     </span>
+  );
+}
+
+/* A vinyl record. The label shows the cover and it turns while music plays. */
+function Record({ track, playing = false, spin = true }) {
+  return (
+    <span className={`record ${playing && spin ? 'is-spinning' : ''}`} aria-hidden="true">
+      <span className="record-label">{track ? <CoverArt track={track} size="fill" round /> : null}</span>
+    </span>
+  );
+}
+
+/* Sleeve with the record sliding out of it. */
+function SleeveStack({ track, playing, spin, onClick, label = 'Open now playing' }) {
+  const body = (
+    <>
+      <span className="stack-record">
+        <Record track={track} playing={playing} spin={spin} />
+      </span>
+      <span className="stack-sleeve">
+        <CoverArt track={track} size="fill" />
+      </span>
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="sleeve-stack is-button" onClick={onClick} aria-label={label}>
+      {body}
+    </button>
+  ) : (
+    <div className="sleeve-stack">{body}</div>
   );
 }
 
@@ -548,132 +693,6 @@ function EmptyState({ icon = 'music', title, text, action }) {
   );
 }
 
-function AuthDialog({ mode, reason, onClose, onSignedIn, onModeChange }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const submitEmail = async (event) => {
-    event.preventDefault();
-    setIsBusy(true);
-    setError('');
-    try {
-      const result = mode === 'register' ? await createAccountWithEmail(email, password) : await signInWithEmail(email, password);
-      onSignedIn(result.user);
-    } catch (authError) {
-      setError(authError?.message?.replace('Firebase: ', '').replace(/ \([^)]*\)\.?$/, '') || 'Authentication failed.');
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const submitGoogle = async () => {
-    setIsBusy(true);
-    setError('');
-    try {
-      const result = await signInWithGoogle();
-      onSignedIn(result.user);
-    } catch (authError) {
-      if (authError?.code !== 'auth/popup-closed-by-user') {
-        setError(authError?.message?.replace('Firebase: ', '').replace(/ \([^)]*\)\.?$/, '') || 'Google sign-in failed.');
-      }
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  return (
-    <div className="auth-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <button type="button" className="icon-btn auth-close" onClick={onClose} aria-label="Close sign in">
-          <Icon name="x" size={20} />
-        </button>
-        <span className="auth-kicker">Sonara account</span>
-        <h2 id="auth-title">{mode === 'register' ? 'Create your account' : 'Welcome back'}</h2>
-        <p className="auth-reason">{reason || 'Sign in to unlock this feature.'}</p>
-        {!isFirebaseConfigured && <p className="auth-error">Firebase is not configured in this build.</p>}
-        <button type="button" className="btn auth-google" onClick={submitGoogle} disabled={isBusy || !isFirebaseConfigured}>
-          Continue with Google
-        </button>
-        <div className="auth-divider"><span>or use email</span></div>
-        <form onSubmit={submitEmail}>
-          <label className="auth-field">
-            <span>Email</span>
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
-          </label>
-          <label className="auth-field">
-            <span>Password</span>
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} minLength="6" required />
-          </label>
-          {error && <p className="auth-error" role="alert">{error}</p>}
-          <button type="submit" className="btn btn-primary btn-wide" disabled={isBusy || !isFirebaseConfigured}>
-            {isBusy ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Sign in'}
-          </button>
-        </form>
-        <button type="button" className="text-btn auth-switch" onClick={() => onModeChange(mode === 'register' ? 'signin' : 'register')}>
-          {mode === 'register' ? 'Already have an account? Sign in' : 'New to Sonara? Create an account'}
-        </button>
-      </section>
-    </div>
-  );
-}
-
-function TrackTable({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLike, showWaveform, showAlbum = true }) {
-  const columns = ['36px', 'minmax(0, 2.4fr)'];
-  if (showAlbum) columns.push('minmax(0, 1.3fr)');
-  if (showWaveform) columns.push('92px');
-  columns.push('52px', '36px');
-
-  return (
-    <div className="track-table" role="table" style={{ '--cols': columns.join(' ') }}>
-      <div className="track-head" role="row">
-        <span role="columnheader">#</span>
-        <span role="columnheader">Title</span>
-        {showAlbum && <span role="columnheader" className="cell-album">Album</span>}
-        {showWaveform && <span className="cell-wave" aria-hidden="true" />}
-        <span role="columnheader" className="cell-time">Time</span>
-        <span aria-hidden="true" />
-      </div>
-
-      {tracks.map((track, index) => {
-        const isCurrent = track.id === currentId;
-        const isLiked = likedIds.has(track.id);
-        return (
-          <div key={track.id} role="row" className={`track-row ${isCurrent ? 'is-current' : ''} ${isCurrent && isPlaying ? 'is-playing' : ''}`} onDoubleClick={() => onPlay(index)}>
-            <button type="button" className="row-play" onClick={() => onPlay(index)} aria-label={`${isCurrent && isPlaying ? 'Pause' : 'Play'} ${track.title}`}>
-              <span className="row-index">{index + 1}</span>
-              <span className="row-eq" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
-              <Icon name={isCurrent && isPlaying ? 'pause' : 'play'} size={16} className="row-icon" />
-            </button>
-            <div className="row-title">
-              <CoverArt track={track} size="sm" />
-              <div className="row-text">
-                <strong>{track.title}</strong>
-                <span>{track.artist}</span>
-              </div>
-            </div>
-            {showAlbum && <span className="row-album cell-album">{track.album}</span>}
-            {showWaveform && (
-              <span className="cell-wave">
-                <Waveform seed={hashString(track.id)} active={isCurrent} />
-              </span>
-            )}
-            <span className="row-time cell-time">{formatTime(track.seconds)}</span>
-            <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
-              <Icon name="heart" size={18} filled={isLiked} />
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function SeekBar({ position, total, onSeek, disabled }) {
   const max = Math.max(total, 1);
   const percent = Math.min(100, (position / max) * 100);
@@ -719,6 +738,47 @@ function TransportControls({ isPlaying, shuffle, repeat, disabled, onToggle, onN
   );
 }
 
+
+function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLike, showWaveform }) {
+  return (
+    <ol className="tracklist">
+      {tracks.map((track, index) => {
+        const isCurrent = track.id === currentId;
+        const isLiked = likedIds.has(track.id);
+        const detail = track.album && track.album !== 'Singles' ? `${track.artist} · ${track.album}` : track.artist;
+        return (
+          <li key={track.id} className={`tl-row ${isCurrent ? 'is-current' : ''} ${isCurrent && isPlaying ? 'is-playing' : ''}`} onDoubleClick={() => onPlay(index)}>
+            <button type="button" className="tl-play" onClick={() => onPlay(index)} aria-label={`${isCurrent && isPlaying ? 'Pause' : 'Play'} ${track.title}`}>
+              <span className="tl-num">{String(index + 1).padStart(2, '0')}</span>
+              <span className="tl-eq" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <Icon name={isCurrent && isPlaying ? 'pause' : 'play'} size={16} className="tl-icon" />
+            </button>
+            <div className="tl-title">
+              <CoverArt track={track} size="sm" />
+              <div className="tl-text">
+                <strong>{track.title}</strong>
+                <span>{detail}</span>
+              </div>
+            </div>
+            <span className="tl-lead" aria-hidden="true">
+              <i className="tl-dots" />
+              {showWaveform && <Waveform seed={hashString(track.id)} active={isCurrent} />}
+            </span>
+            <span className="tl-time">{formatTime(track.seconds)}</span>
+            <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
+              <Icon name="heart" size={19} filled={isLiked} />
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function UploadQueue({ queue, onCancel, onDismiss }) {
   const running = queue.status === 'running';
   const percent = Math.floor(queueFraction(queue) * 100);
@@ -729,10 +789,10 @@ function UploadQueue({ queue, onCancel, onDismiss }) {
   const eta = rate > 0 ? formatEta((untouched - inFlight) / rate) : '';
 
   const titles = {
-    running: queue.cancelling ? 'Cancelling…' : 'Uploading',
-    done: 'Upload complete',
+    running: queue.cancelling ? 'Cancelling…' : 'Taking your music in',
+    done: 'All done',
     cancelled: 'Upload cancelled',
-    partial: 'Finished with errors',
+    partial: 'Finished with a few misses',
     stopped: 'Upload stopped'
   };
 
@@ -746,7 +806,7 @@ function UploadQueue({ queue, onCancel, onDismiss }) {
   } else if (queue.status === 'partial') {
     detail = `${formatCount(queue.failed)} ${queue.failed === 1 ? 'track' : 'tracks'} could not be uploaded and stayed selected so you can retry.`;
   } else {
-    detail = `Stopped after repeated errors${queue.error ? `: ${queue.error}` : '.'} ${formatCount(queue.remaining)} ${queue.remaining === 1 ? 'track is' : 'tracks are'} still selected.`;
+    detail = `Stopped after repeated errors${queue.error ? `: ${queue.error.replace(/\.$/, '')}` : ''}. ${formatCount(queue.remaining)} ${queue.remaining === 1 ? 'track is' : 'tracks are'} still selected.`;
   }
 
   return (
@@ -777,6 +837,14 @@ function UploadQueue({ queue, onCancel, onDismiss }) {
       <div className="progress" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}>
         <i style={{ width: `${percent}%` }} />
       </div>
+
+      {queue.groups && queue.groups.length > 1 && (
+        <div className="queue-ticks" aria-hidden="true" title="One mark per group">
+          {queue.groups.map((state, index) => (
+            <i key={index} className={`tick is-${state} ${running && index === queue.batch - 1 && state === 'pending' ? 'is-current' : ''}`} />
+          ))}
+        </div>
+      )}
 
       <p className="queue-detail">{detail}</p>
 
@@ -813,72 +881,81 @@ function UploadQueue({ queue, onCancel, onDismiss }) {
   );
 }
 
-function NowPlaying({ mode, track, isPlaying, isLiked, onLike, contextLabel, upNext, onJump, djOn, onDj, onClose, position, total, onSeek, onToggle, onNext, onPrevious, shuffle, repeat, onShuffle, onRepeat }) {
+/* Full-screen Now Playing. Escape closes it. */
+function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, onJump, djOn, onDj, onClose, position, total, onSeek, onToggle, onNext, onPrevious, shuffle, repeat, onShuffle, onRepeat }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
   if (!track) return null;
 
   return (
-    <aside className={`np-panel is-${mode}`} aria-label="Now playing">
-      <div className="np-top">
-        {mode === 'overlay' ? (
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close now playing">
-            <Icon name="chevronDown" size={22} />
-          </button>
-        ) : (
-          <span className="np-heading">Now playing</span>
-        )}
-        <div className="np-context">
+    <div className="stage" role="dialog" aria-modal="true" aria-label="Now playing">
+      <div className="stage-top">
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close now playing">
+          <Icon name="chevronDown" size={24} />
+        </button>
+        <div className="stage-context">
           <small>Playing from</small>
           <strong>{contextLabel}</strong>
         </div>
-        <span className="np-spacer" />
+        <span className="stage-spacer" />
       </div>
 
-      <div className="np-art">
-        <CoverArt track={track} size="hero" />
-      </div>
-
-      <div className="np-meta">
-        <div>
-          <h2>{track.title}</h2>
-          <p>{track.artist}</p>
+      <div className="stage-body">
+        <div className="stage-visual">
+          <SleeveStack track={track} playing={isPlaying} spin={spin} />
         </div>
-        <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={onLike} aria-pressed={isLiked} aria-label={isLiked ? 'Remove from favorites' : 'Add to favorites'}>
-          <Icon name="heart" size={22} filled={isLiked} />
-        </button>
-      </div>
 
-      <div className="np-transport">
-        <SeekBar position={position} total={total} onSeek={onSeek} />
-        <TransportControls isPlaying={isPlaying} shuffle={shuffle} repeat={repeat} onToggle={onToggle} onNext={onNext} onPrevious={onPrevious} onShuffle={onShuffle} onRepeat={onRepeat} />
-      </div>
+        <div className="stage-info">
+          <h2>{track.title}</h2>
+          <p className="stage-artist">{track.artist}</p>
 
-      <div className="np-dj">
-        <DjButton active={djOn} onClick={onDj} idleLabel="Start DJ session" />
-        {djOn && <p>Sonara is choosing what plays next.</p>}
-      </div>
+          <div className="stage-actions">
+            <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={onLike} aria-pressed={isLiked} aria-label={isLiked ? 'Remove from favorites' : 'Add to favorites'}>
+              <Icon name="heart" size={22} filled={isLiked} />
+            </button>
+            <DjButton active={djOn} onClick={onDj} idleLabel="Start DJ session" />
+          </div>
 
-      <div className="np-queue">
-        <h3>Up next</h3>
-        {upNext.length ? (
-          <ul>
-            {upNext.map(({ track: item, index }) => (
-              <li key={`${item.id}-${index}`}>
-                <button type="button" onClick={() => onJump(index)}>
-                  <CoverArt track={item} size="xs" />
-                  <span>
-                    <strong>{item.title}</strong>
-                    <small>{item.artist}</small>
-                  </span>
-                  <em>{formatTime(item.seconds)}</em>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="np-empty">Nothing queued after this track.</p>
-        )}
+          <div className="stage-transport">
+            <SeekBar position={position} total={total} onSeek={onSeek} />
+            <TransportControls isPlaying={isPlaying} shuffle={shuffle} repeat={repeat} onToggle={onToggle} onNext={onNext} onPrevious={onPrevious} onShuffle={onShuffle} onRepeat={onRepeat} />
+          </div>
+
+          <div className="stage-queue">
+            <h3>Up next</h3>
+            {upNext.length ? (
+              <ul>
+                {upNext.map(({ track: item, index }) => (
+                  <li key={`${item.id}-${index}`}>
+                    <button type="button" onClick={() => onJump(index)}>
+                      <CoverArt track={item} size="xs" />
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small>{item.artist}</small>
+                      </span>
+                      <em>{formatTime(item.seconds)}</em>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="stage-empty">Nothing queued after this track.</p>
+            )}
+          </div>
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -889,25 +966,17 @@ function NowPlaying({ mode, track, isPlaying, isLiked, onLike, contextLabel, upN
 export default function App() {
   /* navigation + preferences */
   const [view, setView] = useState('home');
-  const [playlistId, setPlaylistId] = useState('uploads');
+  const [playlistId, setPlaylistId] = useState('daily-mix');
   const [libraryTab, setLibraryTab] = useState('songs');
   const [labTab, setLabTab] = useState('themes');
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('name');
   const [prefs, setPrefs] = useState(loadPrefs);
-  const [userPlaylists, setUserPlaylists] = useState([]);
-  const [libraryHydrated, setLibraryHydrated] = useState(false);
   const [notice, setNotice] = useState('');
-  const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
-  const [fullPlayerOpen, setFullPlayerOpen] = useState(false);
-  const [authUser, setAuthUser] = useState(null);
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
-  const [authMode, setAuthMode] = useState('signin');
-  const [authReason, setAuthReason] = useState('');
+  const [stageOpen, setStageOpen] = useState(false);
 
   /* catalog + upload */
   const [catalog, setCatalog] = useState([]);
-  const [durationOverrides, setDurationOverrides] = useState({});
   const [sessionUploads, setSessionUploads] = useState([]);
   const [serverOnline, setServerOnline] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -918,10 +987,10 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
 
   /* player */
-  const initialQueue = useMemo(() => [], []);
+  const initialQueue = useMemo(() => [...starterTracks].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })), []);
   const [queue, setQueue] = useState(initialQueue);
   const [queueBase, setQueueBase] = useState(initialQueue);
-  const [pos, setPos] = useState(0);
+  const [pos, setPos] = useState(() => Math.max(0, initialQueue.findIndex((track) => track.id === 'sample-dimension')));
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -932,75 +1001,29 @@ export default function App() {
   const [contextLabel, setContextLabel] = useState('All Music');
 
   const audioRef = useRef(null);
-  const mainRef = useRef(null);
   const filesInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const advanceRef = useRef(() => {});
   const uploadRunRef = useRef({ cancelled: false, abort: null });
   const controlsRef = useRef({});
 
-  const isWide = useMediaQuery('(min-width: 1280px)');
   const isUploading = uploadQueue?.status === 'running';
   const uploadPercent = Math.floor(queueFraction(uploadQueue) * 100);
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
-
-  useEffect(() => subscribeToAuth(setAuthUser), []);
-
-  useEffect(() => {
-    let active = true;
-    if (!authUser) {
-      setLibraryHydrated(false);
-      setUserPlaylists([]);
-      return undefined;
-    }
-
-    (async () => {
-      try {
-        const response = await authenticatedJsonRequest(`${apiBase}/me/library`);
-        if (!response.ok) throw new Error('Unable to load your saved library.');
-        const data = await response.json();
-        if (!active) return;
-        setPrefs((previous) => ({
-          ...previous,
-          ...(data.preferences || {}),
-          liked: Array.isArray(data.preferences?.liked) ? data.preferences.liked : previous.liked
-        }));
-        setUserPlaylists(Array.isArray(data.playlists) ? data.playlists : []);
-      } catch (error) {
-        console.error('Unable to hydrate user library', error);
-        if (active) setNotice('Your saved library could not be loaded.');
-      } finally {
-        if (active) setLibraryHydrated(true);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [authUser]);
 
   const current = queue[pos] || null;
   const total = audioDuration || current?.seconds || 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
-  const panelMode = fullPlayerOpen || nowPlayingOpen ? 'overlay' : isWide && prefs.showPanel ? 'docked' : null;
 
   const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
 
-  const requireAuth = useCallback((reason) => {
-    if (authUser) return true;
-    setAuthReason(reason);
-    setAuthDialogOpen(true);
-    return false;
-  }, [authUser]);
-
   const toggleLike = useCallback((id) => {
-    if (!requireAuth('Sign in to save favorites and build your personal library.')) return;
     setPrefs((previous) => ({
       ...previous,
       liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
     }));
-  }, [requireAuth]);
+  }, []);
 
   /* ------------------------------ data ------------------------------ */
 
@@ -1022,55 +1045,8 @@ export default function App() {
     fetchCatalog();
   }, [fetchCatalog]);
 
-  const rawCatalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
-
-  useEffect(() => {
-    let active = true;
-    const audio = new Audio();
-    audio.preload = 'metadata';
-    const tracksToProbe = rawCatalogTracks.filter((track) => track.src && track.seconds <= 0);
-
-    const probeTrack = (track) => new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        audio.onloadedmetadata = null;
-        audio.onerror = null;
-        resolve();
-      };
-
-      audio.onloadedmetadata = () => {
-        if (active && Number.isFinite(audio.duration) && audio.duration > 0) {
-          setDurationOverrides((previous) => ({ ...previous, [track.id]: audio.duration }));
-        }
-        finish();
-      };
-      audio.onerror = finish;
-      audio.src = track.src;
-      audio.load();
-    });
-
-    (async () => {
-      for (const track of tracksToProbe) {
-        if (!active) break;
-        await probeTrack(track);
-      }
-    })();
-
-    return () => {
-      active = false;
-      audio.onloadedmetadata = null;
-      audio.onerror = null;
-      audio.removeAttribute('src');
-    };
-  }, [rawCatalogTracks]);
-
-  const catalogTracks = useMemo(
-    () => rawCatalogTracks.map((track) => ({ ...track, seconds: durationOverrides[track.id] || track.seconds })),
-    [rawCatalogTracks, durationOverrides]
-  );
-  const allTracks = catalogTracks;
+  const catalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
+  const allTracks = useMemo(() => [...starterTracks, ...catalogTracks], [catalogTracks]);
   const trackById = useMemo(() => new Map(allTracks.map((track) => [track.id, track])), [allTracks]);
 
   const recentUploads = useMemo(() => {
@@ -1080,11 +1056,11 @@ export default function App() {
 
   const playlists = useMemo(
     () =>
-      [...defaultPlaylists, ...userPlaylists.filter((playlist) => playlist.id !== 'uploads')].map((playlist) => ({
+      defaultPlaylists.map((playlist) => ({
         ...playlist,
         tracks: playlist.dynamic === 'uploads' ? catalogTracks : playlist.trackIds.map((id) => trackById.get(id)).filter(Boolean)
       })),
-    [catalogTracks, trackById, userPlaylists]
+    [catalogTracks, trackById]
   );
   const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0];
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
@@ -1127,15 +1103,7 @@ export default function App() {
   }, [prefs]);
 
   useEffect(() => {
-    if (!authUser || !libraryHydrated) return;
-    authenticatedJsonRequest(`${apiBase}/me/library`, {
-      method: 'PUT',
-      body: JSON.stringify({ preferences: prefs, playlists: userPlaylists })
-    }).catch((error) => console.error('Unable to save user library', error));
-  }, [authUser, libraryHydrated, prefs, userPlaylists]);
-
-  useEffect(() => {
-    mainRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
   }, [view, libraryTab, playlistId]);
 
   useEffect(() => {
@@ -1269,7 +1237,6 @@ export default function App() {
   const cycleRepeat = () => setRepeat((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'));
 
   const toggleDj = () => {
-    if (!requireAuth('Sign in to use Sonara DJ and build an adaptive listening queue.')) return;
     if (djOn) {
       setDjOn(false);
       setNotice('DJ stopped. Your queue stays as it is.');
@@ -1329,6 +1296,21 @@ export default function App() {
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : prefs.volume;
   }, [muted, prefs.volume]);
+
+  /* demo playback for tracks without an audio file */
+  useEffect(() => {
+    if (!isPlaying || !current || current.src) return undefined;
+    const timer = setInterval(() => setPosition((value) => Math.min(value + 0.25, current.seconds)), 250);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, current?.id]);
+
+  useEffect(() => {
+    if (isPlaying && current && !current.src && current.seconds > 0 && position >= current.seconds) {
+      advanceRef.current(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position, isPlaying, current?.id]);
 
   /* keyboard + media keys */
   useEffect(() => {
@@ -1391,7 +1373,6 @@ export default function App() {
   };
 
   const handleUpload = async () => {
-    if (!requireAuth('Create an account to upload music to Sonara.')) return;
     if (isUploading) return;
     if (!selectedFiles.length) {
       setUploadMessage({ tone: 'error', text: 'Choose audio files or a folder before uploading.' });
@@ -1409,9 +1390,9 @@ export default function App() {
     let failed = 0;
     let streak = 0;
     let lastError = '';
-    const token = await getCurrentIdToken();
 
     setUploadMessage(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setUploadQueue({
       status: 'running',
       total: files.length,
@@ -1422,6 +1403,7 @@ export default function App() {
       batchProgress: 0,
       current: groups[0].map((file) => file.name),
       currentSize: groups[0].length,
+      groups: groups.map(() => 'pending'),
       startedAt: Date.now(),
       cancelling: false,
       error: '',
@@ -1446,8 +1428,7 @@ export default function App() {
           const data = await sendUpload(
             formData,
             (fraction) => setUploadQueue((previous) => (previous ? { ...previous, batchProgress: fraction } : previous)),
-            run,
-            token
+            run
           );
           const uploaded = (Array.isArray(data?.tracks) ? data.tracks : []).map(normalizeTrack);
           if (uploaded.length) setSessionUploads((previous) => [...uploaded, ...previous].slice(0, 50));
@@ -1463,11 +1444,11 @@ export default function App() {
         succeeded.add(index);
         done += group.length;
         streak = 0;
-        setUploadQueue((previous) => ({ ...previous, done, batchProgress: 0 }));
+        setUploadQueue((previous) => ({ ...previous, done, batchProgress: 0, groups: previous.groups.map((state, groupIndex) => (groupIndex === index ? 'done' : state)) }));
       } else {
         failed += group.length;
         streak += 1;
-        setUploadQueue((previous) => ({ ...previous, failed, batchProgress: 0 }));
+        setUploadQueue((previous) => ({ ...previous, failed, batchProgress: 0, groups: previous.groups.map((state, groupIndex) => (groupIndex === index ? 'failed' : state)) }));
         if (streak >= MAX_CONSECUTIVE_FAILURES) break;
       }
     }
@@ -1511,14 +1492,11 @@ export default function App() {
   /* ------------------------------ navigation ------------------------------ */
 
   const goTo = (id) => {
-    if (protectedViews.has(id) && !requireAuth(id === 'upload' ? 'Create an account to upload music to Sonara.' : 'Sign in to access your personal music space.')) return;
     setView(id);
-    setNowPlayingOpen(false);
-    setFullPlayerOpen(false);
+    setStageOpen(false);
   };
 
   const openPlaylist = (id) => {
-    if (!requireAuth('Sign in to create and manage your playlists.')) return;
     setPlaylistId(id);
     goTo('playlists');
   };
@@ -1533,21 +1511,6 @@ export default function App() {
     goTo('all-music');
   };
 
-  const toggleNowPlaying = () => {
-    if (panelMode) {
-      setNowPlayingOpen(false);
-      setFullPlayerOpen(false);
-      return;
-    }
-    setFullPlayerOpen(true);
-  };
-
-  const openNowPlaying = () => {
-    if (!current) return;
-    setFullPlayerOpen(true);
-    setNowPlayingOpen(false);
-  };
-
   const upNext = queue.slice(pos + 1, pos + 6).map((track, offset) => ({ track, index: pos + 1 + offset }));
   const tableProps = {
     currentId: current?.id,
@@ -1559,86 +1522,107 @@ export default function App() {
 
   /* ------------------------------ views ------------------------------ */
 
-  const renderHome = () => (
-    <>
-      <section className="home-hero">
-        <p className="greeting">
-          {greeting()}, {USER_NAME}
-        </p>
-        <h1>What do you want to hear?</h1>
-        <p className="hero-sub">Let Sonara set the vibe.</p>
-        <DjButton active={djOn} onClick={toggleDj} />
-      </section>
+  const renderHome = () => {
+    const scapes = [
+      { id: 'favorites', name: 'Favorites', kind: 'Yours', tracks: favoriteTracks, open: () => goTo('favorites') },
+      ...playlists.map((playlist) => ({
+        id: playlist.id,
+        name: playlist.name,
+        kind: playlist.dynamic ? 'Library' : 'Playlist',
+        tracks: playlist.tracks,
+        open: () => openPlaylist(playlist.id)
+      }))
+    ];
 
-      <section className="block">
-        <SectionHead title="Soundscapes" note="Curated vibes for your mood" />
-        <div className="scape-grid">
-          {[
-            { id: 'favorites', name: 'Favorites', icon: 'heart', tracks: favoriteTracks, open: () => goTo('favorites') },
-            ...playlists.map((playlist) => ({
-              id: playlist.id,
-              name: playlist.name,
-              icon: playlist.dynamic ? 'upload' : 'list',
-              tracks: playlist.tracks,
-              open: () => openPlaylist(playlist.id)
-            }))
-          ].map((scape) => (
-            <div key={scape.id} className="scape-card">
-              <button type="button" className="scape-body" onClick={scape.open}>
-                <span className="scape-icon">
-                  <Icon name={scape.icon} size={18} />
-                </span>
-                <span className="scape-text">
-                  <strong>{scape.name}</strong>
-                  <small>{plural(scape.tracks.length, 'track')}</small>
-                </span>
-              </button>
-              <button type="button" className="scape-play" disabled={!scape.tracks.length} onClick={() => startPlayback(scape.tracks, 0, scape.name)} aria-label={`Play ${scape.name}`}>
-                <Icon name="play" size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
+    return (
+      <>
+        <section className="hero">
+          <div className="hero-copy">
+            <p className="greeting">
+              <i className="live-dot" aria-hidden="true" />
+              {greeting()}, {USER_NAME}
+            </p>
+            <h1>What do you want to hear?</h1>
+            <p className="hero-sub">Let Sonara set the vibe.</p>
+            <DjButton active={djOn} onClick={toggleDj} />
+          </div>
 
-      <section className="block">
-        <SectionHead title="Jump back in" note="Recently added to your library" action={<button type="button" className="text-btn" onClick={() => goTo('all-music')}>See all</button>} />
-        <div className="tile-grid">
-          {recentTracks.map((track, index) => (
-            <button key={track.id} type="button" className="tile" onClick={() => playFromList(recentTracks, index, 'Recently added')}>
-              <span className="tile-art">
-                <CoverArt track={track} size="fill" />
-                <span className="tile-play">
-                  <Icon name={current?.id === track.id && isPlaying ? 'pause' : 'play'} size={16} />
-                </span>
-              </span>
-              <strong>{track.title}</strong>
-              <small>{track.artist}</small>
-            </button>
-          ))}
-        </div>
-      </section>
-    </>
-  );
+          <div className="hero-visual">
+            <SleeveStack track={current} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
+            {current && (
+              <p className="hero-caption">
+                <span>{isPlaying ? 'Now spinning' : 'Ready on the deck'}</span>
+                <strong>{current.title}</strong>
+                <em>{current.artist}</em>
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="block">
+          <SectionHead title="Soundscapes" note="Curated vibes for your mood" />
+          <div className="scape-grid">
+            {scapes.map((scape, index) => {
+              const tone = SCAPE_TONES[index % SCAPE_TONES.length];
+              return (
+                <div key={scape.id} className="scape" style={{ '--tone-bg': tone.bg, '--tone-fg': tone.fg }}>
+                  <button type="button" className="scape-body" onClick={scape.open}>
+                    <span className="scape-kind">{scape.kind}</span>
+                    <span className="scape-name">{scape.name}</span>
+                    <span className="scape-count">{plural(scape.tracks.length, 'track')}</span>
+                  </button>
+                  <button type="button" className="scape-play" disabled={!scape.tracks.length} onClick={() => startPlayback(scape.tracks, 0, scape.name)} aria-label={`Play ${scape.name}`}>
+                    <Icon name="play" size={18} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="block">
+          <SectionHead title="Jump back in" note="Recently added to your library" action={<button type="button" className="text-btn" onClick={() => goTo('all-music')}>See everything</button>} />
+          <div className="sleeve-grid">
+            {recentTracks.map((track, index) => (
+              <div key={track.id} className="tile">
+                <button type="button" className="tile-hit" onClick={() => playFromList(recentTracks, index, 'Recently added')}>
+                  <span className="tile-art">
+                    <span className="peek">
+                      <Record track={track} />
+                    </span>
+                    <CoverArt track={track} size="fill" />
+                    <span className="tile-play">
+                      <Icon name={current?.id === track.id && isPlaying ? 'pause' : 'play'} size={18} />
+                    </span>
+                  </span>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      </>
+    );
+  };
 
   const renderAllMusic = () => (
     <>
-      <div className="toolbar">
-        <div className="chips" role="group" aria-label="Sort tracks">
-          {sortOptions.map((option) => (
-            <button key={option.id} type="button" className={`chip ${sortKey === option.id ? 'is-active' : ''}`} aria-pressed={sortKey === option.id} onClick={() => setSortKey(option.id)}>
-              {option.label}
-            </button>
-          ))}
-        </div>
+      <div className="sortbar">
+        <span>Sort by</span>
+        {sortOptions.map((option) => (
+          <button key={option.id} type="button" className={`sort-link ${sortKey === option.id ? 'is-active' : ''}`} aria-pressed={sortKey === option.id} onClick={() => setSortKey(option.id)}>
+            {option.label}
+          </button>
+        ))}
         {query && (
-          <button type="button" className="text-btn" onClick={() => setQuery('')}>
+          <button type="button" className="text-btn sortbar-clear" onClick={() => setQuery('')}>
             Clear search for “{query}”
           </button>
         )}
       </div>
       {visibleTracks.length ? (
-        <TrackTable tracks={visibleTracks} {...tableProps} onPlay={(index) => playFromList(visibleTracks, index, query ? `Search: ${query}` : 'All Music')} />
+        <Tracklist tracks={visibleTracks} {...tableProps} onPlay={(index) => playFromList(visibleTracks, index, query ? `Search: ${query}` : 'All Music')} />
       ) : (
         <EmptyState icon="search" title="No matches" text={`Nothing in your library matches “${query}”.`} action={<button type="button" className="btn" onClick={() => setQuery('')}>Clear search</button>} />
       )}
@@ -1647,34 +1631,37 @@ export default function App() {
 
   const renderLibrary = () => (
     <>
-      <div className="segmented" role="tablist" aria-label="Library sections">
+      <div className="tabs" role="tablist" aria-label="Library sections">
         {[
           ['songs', 'Songs'],
           ['albums', 'Albums'],
           ['artists', 'Artists'],
           ['playlists', 'Playlists']
         ].map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={libraryTab === id} className={libraryTab === id ? 'is-active' : ''} onClick={() => setLibraryTab(id)}>
+          <button key={id} type="button" role="tab" aria-selected={libraryTab === id} className={`tab-link ${libraryTab === id ? 'is-active' : ''}`} onClick={() => setLibraryTab(id)}>
             {label}
           </button>
         ))}
       </div>
 
-      {libraryTab === 'songs' && <TrackTable tracks={libraryTracks} {...tableProps} onPlay={(index) => playFromList(libraryTracks, index, 'Library')} />}
+      {libraryTab === 'songs' && <Tracklist tracks={libraryTracks} {...tableProps} onPlay={(index) => playFromList(libraryTracks, index, 'Library')} />}
 
       {libraryTab === 'albums' && (
-        <div className="tile-grid">
+        <div className="sleeve-grid">
           {albums.map((album) => (
-            <div key={album.name} className="tile-card">
-              <button type="button" className="tile" onClick={() => searchFor(album.name)}>
+            <div key={album.name} className="tile">
+              <button type="button" className="tile-hit" onClick={() => searchFor(album.name)}>
                 <span className="tile-art">
-                  <CoverArt track={album.items[0]} size="fill" />
+                  <span className="peek">
+                    <Record track={album.items[0]} />
+                  </span>
+                  <CoverArt track={{ id: album.name }} size="fill" />
                 </span>
                 <strong>{album.name}</strong>
                 <small>{plural(album.items.length, 'track')}</small>
               </button>
               <button type="button" className="tile-fab" onClick={() => startPlayback(album.items, 0, album.name)} aria-label={`Play ${album.name}`}>
-                <Icon name="play" size={16} />
+                <Icon name="play" size={18} />
               </button>
             </div>
           ))}
@@ -1685,15 +1672,13 @@ export default function App() {
         <div className="artist-grid">
           {artists.map((artist) => (
             <div key={artist.name} className="artist-card">
-              <button type="button" className="artist-main" onClick={() => searchFor(artist.name)}>
-                <span className="avatar">{artist.name.slice(0, 1).toUpperCase()}</span>
-                <span>
-                  <strong>{artist.name}</strong>
-                  <small>{plural(artist.items.length, 'track')}</small>
-                </span>
+              <button type="button" className="artist-hit" onClick={() => searchFor(artist.name)}>
+                <CoverArt track={{ id: artist.name }} size="fill" round />
+                <strong>{artist.name}</strong>
+                <small>{plural(artist.items.length, 'track')}</small>
               </button>
-              <button type="button" className="icon-btn" onClick={() => startPlayback(artist.items, 0, artist.name)} aria-label={`Play ${artist.name}`}>
-                <Icon name="play" size={16} />
+              <button type="button" className="tile-fab is-round" onClick={() => startPlayback(artist.items, 0, artist.name)} aria-label={`Play ${artist.name}`}>
+                <Icon name="play" size={18} />
               </button>
             </div>
           ))}
@@ -1704,8 +1689,8 @@ export default function App() {
         <div className="list-stack">
           {[{ id: 'favorites', name: 'Favorites', description: 'Songs you have hearted', tracks: favoriteTracks }, ...playlists].map((playlist) => (
             <button key={playlist.id} type="button" className="list-card" onClick={() => (playlist.id === 'favorites' ? goTo('favorites') : openPlaylist(playlist.id))}>
-              <span className="scape-icon">
-                <Icon name={playlist.id === 'favorites' ? 'heart' : 'list'} size={18} />
+              <span className="list-card-art">
+                <CoverArt track={{ id: playlist.id }} size="sm" />
               </span>
               <span className="list-card-text">
                 <strong>{playlist.name}</strong>
@@ -1720,44 +1705,43 @@ export default function App() {
   );
 
   const renderPlaylists = () => (
-    <div className="playlist-layout">
-      <aside className="playlist-picker" aria-label="Choose a playlist">
+    <div className="pl-layout">
+      <nav className="pl-menu" aria-label="Choose a playlist">
         {playlists.map((playlist) => (
-          <button key={playlist.id} type="button" className={`picker-item ${playlist.id === selectedPlaylist.id ? 'is-active' : ''}`} onClick={() => setPlaylistId(playlist.id)}>
-            <Icon name={playlist.dynamic ? 'upload' : 'list'} size={16} />
+          <button key={playlist.id} type="button" className={`pl-item ${playlist.id === selectedPlaylist.id ? 'is-active' : ''}`} aria-current={playlist.id === selectedPlaylist.id ? 'true' : undefined} onClick={() => setPlaylistId(playlist.id)}>
             <span>{playlist.name}</span>
-            <em>{playlist.tracks.length}</em>
+            <sup>{playlist.tracks.length}</sup>
           </button>
         ))}
-      </aside>
+      </nav>
 
-      <section className="playlist-main">
-        <div className="playlist-head">
-          <div className="playlist-cover">
-            <CoverArt track={{ id: selectedPlaylist.id }} size="fill" />
+      <section className="pl-main">
+        <div className="pl-head">
+          <div className="pl-cover">
+            <SleeveStack track={{ id: selectedPlaylist.id }} playing={false} spin={false} />
           </div>
-          <div className="playlist-info">
+          <div className="pl-info">
             <h2>{selectedPlaylist.name}</h2>
             <p>{selectedPlaylist.description}</p>
             <small>
               {plural(selectedPlaylist.tracks.length, 'track')}
               {selectedPlaylist.tracks.length ? `, ${totalRuntime(selectedPlaylist.tracks)}` : ''}
             </small>
-          </div>
-          <div className="playlist-actions">
-            <button type="button" className="btn btn-primary" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, 0, selectedPlaylist.name, false)}>
-              <Icon name="play" size={16} /> Play
-            </button>
-            <button type="button" className="btn" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, Math.floor(Math.random() * selectedPlaylist.tracks.length), selectedPlaylist.name, true)}>
-              <Icon name="shuffle" size={16} /> Shuffle
-            </button>
+            <div className="pl-actions">
+              <button type="button" className="btn btn-primary" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, 0, selectedPlaylist.name, false)}>
+                <Icon name="play" size={16} /> Play
+              </button>
+              <button type="button" className="btn" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, Math.floor(Math.random() * selectedPlaylist.tracks.length), selectedPlaylist.name, true)}>
+                <Icon name="shuffle" size={16} /> Shuffle
+              </button>
+            </div>
           </div>
         </div>
 
         {selectedPlaylist.tracks.length ? (
-          <TrackTable tracks={selectedPlaylist.tracks} {...tableProps} onPlay={(index) => playFromList(selectedPlaylist.tracks, index, selectedPlaylist.name)} />
+          <Tracklist tracks={selectedPlaylist.tracks} {...tableProps} onPlay={(index) => playFromList(selectedPlaylist.tracks, index, selectedPlaylist.name)} />
         ) : (
-          <EmptyState icon="upload" title="No uploads yet" text="Tracks you upload will appear here." action={<button type="button" className="btn" onClick={() => goTo('upload')}>Upload music</button>} />
+          <EmptyState icon="upload" title="No uploads yet" text="Tracks you upload will appear here." action={<button type="button" className="btn" onClick={() => goTo('upload')}>Add music</button>} />
         )}
       </section>
     </div>
@@ -1774,7 +1758,7 @@ export default function App() {
             <Icon name="shuffle" size={16} /> Shuffle
           </button>
         </div>
-        <TrackTable tracks={favoriteTracks} {...tableProps} onPlay={(index) => playFromList(favoriteTracks, index, 'Favorites')} />
+        <Tracklist tracks={favoriteTracks} {...tableProps} onPlay={(index) => playFromList(favoriteTracks, index, 'Favorites')} />
       </>
     ) : (
       <EmptyState icon="heart" title="No favorites yet" text="Tap the heart on any track and it will show up here." action={<button type="button" className="btn" onClick={() => goTo('all-music')}>Browse all music</button>} />
@@ -1787,12 +1771,12 @@ export default function App() {
 
         {!isUploading && (
           <>
-            <div className="segmented" role="tablist" aria-label="Upload source">
+            <div className="tabs is-small" role="tablist" aria-label="Upload source">
               {[
                 ['files', 'Files'],
                 ['folder', 'Folder']
               ].map(([id, label]) => (
-                <button key={id} type="button" role="tab" aria-selected={uploadMode === id} className={uploadMode === id ? 'is-active' : ''} onClick={() => setUploadMode(id)}>
+                <button key={id} type="button" role="tab" aria-selected={uploadMode === id} className={`tab-link ${uploadMode === id ? 'is-active' : ''}`} onClick={() => setUploadMode(id)}>
                   {label}
                 </button>
               ))}
@@ -1831,8 +1815,8 @@ export default function App() {
                 hidden
                 onChange={handleInputChange}
               />
-              <span className="drop-icon">
-                <Icon name={uploadMode === 'folder' ? 'folder' : 'upload'} size={24} />
+              <span className="drop-record">
+                <Record playing={isDragging} spin />
               </span>
               <strong>Drop your music here</strong>
               <span>{uploadMode === 'folder' ? 'or click to choose a folder' : 'or click to choose files'}</span>
@@ -1854,7 +1838,9 @@ export default function App() {
               <div className="file-list">
                 <div className="file-list-head">
                   <div>
-                    <strong>{formatCount(selectedFiles.length)} {selectedFiles.length === 1 ? 'track' : 'tracks'} selected</strong>
+                    <strong>
+                      {formatCount(selectedFiles.length)} {selectedFiles.length === 1 ? 'track' : 'tracks'} selected
+                    </strong>
                     <span className="file-meta">
                       {formatBytes(selectedFiles.reduce((sum, file) => sum + file.size, 0))}
                       {selectedFiles.length > batchSize ? ` · ${formatCount(Math.ceil(selectedFiles.length / batchSize))} groups of ${batchSize}` : ''}
@@ -1897,7 +1883,7 @@ export default function App() {
           <h3>Before you upload</h3>
           <ul>
             <li>Drop a single track or a full album folder.</li>
-            <li>Artwork and details are read from the files themselves.</li>
+            <li>Big selections are sent in small groups, so you can cancel any time.</li>
             <li>Files that are not audio are skipped automatically.</li>
           </ul>
           <p className={`server-status ${serverOnline === false ? 'is-offline' : ''}`}>
@@ -1930,13 +1916,13 @@ export default function App() {
 
   const renderLab = () => (
     <>
-      <div className="segmented" role="tablist" aria-label="Appearance sections">
+      <div className="tabs" role="tablist" aria-label="Appearance sections">
         {[
           ['themes', 'Themes'],
           ['colors', 'Colors'],
           ['settings', 'Settings']
         ].map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={labTab === id} className={labTab === id ? 'is-active' : ''} onClick={() => setLabTab(id)}>
+          <button key={id} type="button" role="tab" aria-selected={labTab === id} className={`tab-link ${labTab === id ? 'is-active' : ''}`} onClick={() => setLabTab(id)}>
             {label}
           </button>
         ))}
@@ -1945,20 +1931,23 @@ export default function App() {
       {labTab === 'themes' && (
         <div className="theme-grid" role="radiogroup" aria-label="Theme">
           {[
-            ['dark', 'Dark', 'moon'],
-            ['light', 'Light', 'sun'],
-            ['system', 'System', 'monitor']
-          ].map(([id, label, icon]) => (
+            ['light', 'Paper', 'Warm daylight, ink black type'],
+            ['dark', 'Night', 'A dim listening room'],
+            ['system', 'System', 'Follows your device']
+          ].map(([id, label, note]) => (
             <button key={id} type="button" role="radio" aria-checked={prefs.theme === id} className={`theme-card ${prefs.theme === id ? 'is-active' : ''}`} onClick={() => updatePrefs({ theme: id })}>
               <span className={`theme-preview is-${id}`}>
-                <i />
-                <i />
-                <i />
+                <i className="tp-title" />
+                <i className="tp-line" />
+                <i className="tp-line is-short" />
+                <i className="tp-deck" />
               </span>
               <span className="theme-label">
-                <Icon name={icon} size={16} />
-                {label}
-                {prefs.theme === id && <Icon name="check" size={16} className="theme-check" />}
+                <span>
+                  <strong>{label}</strong>
+                  <small>{note}</small>
+                </span>
+                {prefs.theme === id && <Icon name="check" size={18} className="theme-check" />}
               </span>
             </button>
           ))}
@@ -1969,7 +1958,7 @@ export default function App() {
         <div className="colors-layout">
           <div className="info-box">
             <h3>Accent color</h3>
-            <p className="muted-text">Used for active states, buttons and progress. Neutral by default.</p>
+            <p className="muted-text">A single signal color for progress, hearts and what is playing.</p>
             <div className="swatches" role="radiogroup" aria-label="Accent color">
               {accentOptions.map((option) => (
                 <button key={option.id} type="button" role="radio" aria-checked={prefs.accent === option.id} aria-label={option.name} title={option.name} className={`swatch ${prefs.accent === option.id ? 'is-active' : ''}`} style={{ '--swatch': option[resolvedTheme] }} onClick={() => updatePrefs({ accent: option.id })} />
@@ -1980,30 +1969,33 @@ export default function App() {
               </label>
             </div>
             <p className="swatch-name">{prefs.accent === 'custom' ? `Custom ${prefs.customAccent.toUpperCase()}` : accentOptions.find((option) => option.id === prefs.accent)?.name}</p>
-            <button type="button" className="text-btn" onClick={() => updatePrefs({ accent: 'ivory' })}>
+            <button type="button" className="text-btn" onClick={() => updatePrefs({ accent: 'poppy' })}>
               <Icon name="reset" size={14} /> Reset to default
             </button>
           </div>
 
-          <div className="info-box preview-card">
+          <div className="info-box">
             <h3>Preview</h3>
-            <div className="preview-player">
-              <CoverArt track={current} size="sm" />
-              <span>
+            <div className="preview-deck">
+              <span className="preview-record">
+                <Record track={current} playing={isPlaying} spin={prefs.spin} />
+              </span>
+              <span className="preview-text">
                 <strong>{current?.title || 'Nothing playing'}</strong>
                 <small>{current?.artist || 'Pick a track to start'}</small>
               </span>
               <span className="play-fab play-fab-sm" aria-hidden="true">
                 <Icon name="play" size={16} />
               </span>
+              <div className="slider preview-slider" style={{ '--fill': '38%' }} aria-hidden="true" />
             </div>
-            <div className="slider preview-slider" style={{ '--fill': '38%' }} aria-hidden="true" />
             <div className="preview-row">
               <span className="btn btn-primary">Primary</span>
-              <span className="chip is-active">Selected</span>
+              <span className="sort-link is-active">Selected</span>
               <span className="switch is-on" aria-hidden="true">
                 <i />
               </span>
+              <Icon name="heart" size={22} filled className="preview-heart" />
             </div>
           </div>
         </div>
@@ -2011,15 +2003,15 @@ export default function App() {
 
       {labTab === 'settings' && (
         <div className="info-box settings-box">
-          <Toggle checked={prefs.waveforms} onChange={(value) => updatePrefs({ waveforms: value })} label="Show waveforms" description="Adds a small waveform to each row in track lists." />
+          <Toggle checked={prefs.waveforms} onChange={(value) => updatePrefs({ waveforms: value })} label="Show waveforms" description="Draws a small waveform along each line of a track list." />
+          <Toggle checked={prefs.spin} onChange={(value) => updatePrefs({ spin: value })} label="Spinning records" description="Records turn while music plays. Off keeps everything still." />
           <Toggle checked={prefs.compact} onChange={(value) => updatePrefs({ compact: value })} label="Compact rows" description="Fits more tracks on screen at once." />
-          <Toggle checked={prefs.showPanel} onChange={(value) => updatePrefs({ showPanel: value })} label="Now playing panel" description="Keeps the panel open beside your music on wide screens." />
           <div className="setting-row">
             <div>
               <strong>Reset appearance</strong>
               <span>Restores theme, accent color and display options.</span>
             </div>
-            <button type="button" className="btn" onClick={() => updatePrefs({ theme: 'dark', accent: 'ivory', waveforms: true, compact: false, showPanel: true })}>
+            <button type="button" className="btn" onClick={() => updatePrefs({ theme: 'light', accent: 'poppy', waveforms: true, compact: false, spin: true })}>
               Reset
             </button>
           </div>
@@ -2040,7 +2032,7 @@ export default function App() {
   const subtitle = view === 'all-music' ? (query ? `${plural(visibleTracks.length, 'result')} for “${query}”` : plural(allTracks.length, 'track')) : pageMeta[view]?.subtitle;
 
   return (
-    <div className={`app-shell ${panelMode === 'docked' ? 'has-panel' : ''} ${prefs.compact ? 'is-compact' : ''}`}>
+    <div className={`app-shell ${prefs.compact ? 'is-compact' : ''}`}>
       <audio
         ref={audioRef}
         preload="metadata"
@@ -2055,43 +2047,26 @@ export default function App() {
         }}
       />
 
-      <aside className="sidebar">
-        <div className="brand">
-          <Icon name="wave" size={22} />
-          <span>Sonara</span>
-        </div>
+      <header className="masthead">
+        <button type="button" className="brandmark" onClick={() => goTo('home')} aria-label="Sonara, go to home">
+          <span className="brandmark-disc" aria-hidden="true" />
+          Sonara
+        </button>
 
-        <nav className="nav-stack" aria-label="Main navigation">
-          {navItems.map((item) => (
-            <button key={item.id} type="button" className={`nav-item ${item.id === 'upload' ? 'nav-upload' : ''} ${view === item.id ? 'is-active' : ''}`} aria-current={view === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
-              <Icon name={item.icon} size={19} />
-              {item.label}
-              {item.id === 'upload' && isUploading && <span className="nav-badge">{uploadPercent}%</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-section">
-          <p>Your playlists</p>
-          <div className="side-playlists">
-            {playlists.map((playlist) => (
-              <button key={playlist.id} type="button" className={`side-playlist ${view === 'playlists' && selectedPlaylist.id === playlist.id ? 'is-active' : ''}`} onClick={() => openPlaylist(playlist.id)}>
-                {playlist.name}
+        <nav className="masthead-nav" aria-label="Main navigation">
+          {navItems
+            .filter((item) => item.id !== 'upload')
+            .map((item) => (
+              <button key={item.id} type="button" className={`mnav ${view === item.id ? 'is-active' : ''}`} aria-current={view === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
+                {item.label}
               </button>
             ))}
-          </div>
-        </div>
-      </aside>
+        </nav>
 
-      <main className="main" ref={mainRef}>
-        <div className="topbar">
-          <div className="topbar-brand">
-            <Icon name="wave" size={20} />
-            <span>Sonara</span>
-          </div>
+        <div className="masthead-tools">
           <label className="search">
             <Icon name="search" size={18} />
-            <input type="search" value={query} onChange={(event) => handleSearch(event.target.value)} placeholder="Search songs, artists, albums…" aria-label="Search your music" />
+            <input type="search" value={query} onChange={(event) => handleSearch(event.target.value)} placeholder="Search your library" aria-label="Search your music" />
             {query && (
               <button type="button" className="icon-btn search-clear" onClick={() => setQuery('')} aria-label="Clear search">
                 <Icon name="x" size={16} />
@@ -2104,95 +2079,49 @@ export default function App() {
               Uploading {formatCount(uploadQueue.done)} / {formatCount(uploadQueue.total)}
             </button>
           )}
-          <button type="button" className="icon-btn topbar-upload" onClick={() => goTo('upload')} aria-label="Upload music">
-            <Icon name="upload" size={20} />
+          <button type="button" className={`btn-add ${view === 'upload' ? 'is-active' : ''}`} onClick={() => goTo('upload')} aria-label="Add music">
+            <Icon name="plus" size={18} />
+            <span>Add music</span>
           </button>
-          {authUser ? (
-            <button type="button" className="auth-account" onClick={() => signOutUser()} title={authUser.email || 'Signed in'}>
-              <span>{authUser.displayName || authUser.email?.split('@')[0] || 'Account'}</span>
-              <small>Sign out</small>
-            </button>
-          ) : (
-            <button type="button" className="btn auth-topbar" onClick={() => { setAuthReason('Sign in to unlock your personal Sonara features.'); setAuthDialogOpen(true); }}>
-              Sign in
-            </button>
-          )}
         </div>
+      </header>
 
-        <div className="page">
-          {view === 'home' ? (
-            renderHome()
-          ) : (
-            <>
-              <header className="page-head">
-                <h1>{pageMeta[view]?.title}</h1>
-                {subtitle && <p>{subtitle}</p>}
-              </header>
-              {pageContent[view]?.()}
-            </>
-          )}
-        </div>
+      <main className={`page ${view === 'home' ? 'is-home' : ''}`}>
+        {view === 'home' ? (
+          renderHome()
+        ) : (
+          <>
+            <header className="page-head">
+              <h1>{pageMeta[view]?.title}</h1>
+              {subtitle && <p>{subtitle}</p>}
+            </header>
+            {pageContent[view]?.()}
+          </>
+        )}
       </main>
 
-      {panelMode && (
-        <NowPlaying
-          mode={panelMode}
-          track={current}
-          isPlaying={isPlaying}
-          isLiked={current ? likedIds.has(current.id) : false}
-          onLike={() => current && toggleLike(current.id)}
-          contextLabel={contextLabel}
-          upNext={upNext}
-          onJump={jumpTo}
-          djOn={djOn}
-          onDj={toggleDj}
-          onClose={() => {
-            setNowPlayingOpen(false);
-            setFullPlayerOpen(false);
-          }}
-          position={position}
-          total={total}
-          onSeek={seekTo}
-          onToggle={togglePlay}
-          onNext={() => advance(false)}
-          onPrevious={previous}
-          shuffle={shuffle}
-          repeat={repeat}
-          onShuffle={toggleShuffle}
-          onRepeat={cycleRepeat}
-        />
-      )}
+      <footer className="deck" aria-label="Player">
+        <button type="button" className="deck-now" onClick={() => current && setStageOpen(true)} aria-label="Open now playing">
+          <span className="deck-disc">
+            <Record track={current} playing={isPlaying} spin={prefs.spin} />
+          </span>
+          <span className="deck-text">
+            <strong>{current?.title || 'Nothing playing'}</strong>
+            <small>{current?.artist || 'Choose a track to begin'}</small>
+          </span>
+        </button>
 
-      <footer className="player-bar">
-        <div className="pb-track" onClick={openNowPlaying} role="button" tabIndex={current ? 0 : -1} onKeyDown={(event) => {
-          if (current && (event.key === 'Enter' || event.key === ' ')) {
-            event.preventDefault();
-            openNowPlaying();
-          }
-        }}>
-          <button type="button" className="pb-open" aria-label="Open now playing">
-            {current ? <CoverArt track={current} size="md" /> : <span className="cover cover-md" />}
-            <span className="pb-text">
-              <strong>{current?.title || 'Nothing playing'}</strong>
-              <small>{current?.artist || 'Choose a track to begin'}</small>
-            </span>
-          </button>
-          {current && (
-            <button type="button" className={`icon-btn heart pb-heart ${likedIds.has(current.id) ? 'is-on' : ''}`} onClick={(event) => {
-              event.stopPropagation();
-              toggleLike(current.id);
-            }} aria-pressed={likedIds.has(current.id)} aria-label={likedIds.has(current.id) ? 'Remove from favorites' : 'Add to favorites'}>
-              <Icon name="heart" size={18} filled={likedIds.has(current.id)} />
-            </button>
-          )}
-        </div>
-
-        <div className="pb-center">
+        <div className="deck-center">
           <TransportControls isPlaying={isPlaying} shuffle={shuffle} repeat={repeat} disabled={!current} onToggle={togglePlay} onNext={() => advance(false)} onPrevious={previous} onShuffle={toggleShuffle} onRepeat={cycleRepeat} />
           <SeekBar position={position} total={total} onSeek={seekTo} disabled={!current} />
         </div>
 
-        <div className="pb-right">
+        <div className="deck-right">
+          {current && (
+            <button type="button" className={`icon-btn heart ${likedIds.has(current.id) ? 'is-on' : ''}`} onClick={() => toggleLike(current.id)} aria-pressed={likedIds.has(current.id)} aria-label={likedIds.has(current.id) ? 'Remove from favorites' : 'Add to favorites'}>
+              <Icon name="heart" size={19} filled={likedIds.has(current.id)} />
+            </button>
+          )}
           <DjButton active={djOn} onClick={toggleDj} />
           <div className="volume">
             <button type="button" className="icon-btn" onClick={() => setMuted((value) => !value)} aria-label={muted ? 'Unmute' : 'Mute'}>
@@ -2213,18 +2142,44 @@ export default function App() {
               aria-label="Volume"
             />
           </div>
-          <button type="button" className={`icon-btn ${panelMode ? 'is-active' : ''}`} onClick={toggleNowPlaying} aria-pressed={Boolean(panelMode)} aria-label="Toggle now playing panel">
-            <Icon name="panel" size={18} />
+          <button type="button" className="icon-btn" onClick={() => current && setStageOpen(true)} aria-label="Expand player">
+            <Icon name="expand" size={18} />
           </button>
         </div>
 
-        <button type="button" className="pb-mobile-play" onClick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'} disabled={!current}>
+        <button type="button" className="deck-mobile-play" onClick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'} disabled={!current}>
           <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
         </button>
-        <div className="pb-line" aria-hidden="true">
+        <div className="deck-line" aria-hidden="true">
           <i style={{ width: `${Math.min(100, (position / Math.max(total, 1)) * 100)}%` }} />
         </div>
       </footer>
+
+      {stageOpen && current && (
+        <Stage
+          track={current}
+          isPlaying={isPlaying}
+          spin={prefs.spin}
+          isLiked={likedIds.has(current.id)}
+          onLike={() => toggleLike(current.id)}
+          contextLabel={contextLabel}
+          upNext={upNext}
+          onJump={jumpTo}
+          djOn={djOn}
+          onDj={toggleDj}
+          onClose={() => setStageOpen(false)}
+          position={position}
+          total={total}
+          onSeek={seekTo}
+          onToggle={togglePlay}
+          onNext={() => advance(false)}
+          onPrevious={previous}
+          shuffle={shuffle}
+          repeat={repeat}
+          onShuffle={toggleShuffle}
+          onRepeat={cycleRepeat}
+        />
+      )}
 
       <nav className="tabbar" aria-label="Primary">
         {navItems
@@ -2241,16 +2196,6 @@ export default function App() {
         <div className="toast" role="status">
           {notice}
         </div>
-      )}
-
-      {authDialogOpen && (
-        <AuthDialog
-          mode={authMode}
-          reason={authReason}
-          onClose={() => setAuthDialogOpen(false)}
-          onSignedIn={() => setAuthDialogOpen(false)}
-          onModeChange={setAuthMode}
-        />
       )}
     </div>
   );
