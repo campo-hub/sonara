@@ -417,16 +417,6 @@ const ICONS = {
       <path d="M15 4v16" />
     </>
   ),
-  maximize: (
-    <>
-      <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
-    </>
-  ),
-  minimize: (
-    <>
-      <path d="M8 3v5H3M16 3v5h5M21 16h-5v5M3 16h5v5" />
-    </>
-  ),
   disc: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -824,31 +814,10 @@ function UploadQueue({ queue, onCancel, onDismiss }) {
 }
 
 function NowPlaying({ mode, track, isPlaying, isLiked, onLike, contextLabel, upNext, onJump, djOn, onDj, onClose, position, total, onSeek, onToggle, onNext, onPrevious, shuffle, repeat, onShuffle, onRepeat }) {
-  const panelRef = useRef(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === panelRef.current);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  const toggleFullscreen = async () => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await panelRef.current?.requestFullscreen();
-      }
-    } catch {
-      /* Fullscreen can be blocked by browser permissions or an embedded page. */
-    }
-  };
-
   if (!track) return null;
 
   return (
-    <aside ref={panelRef} className={`np-panel is-${mode}`} aria-label="Now playing">
+    <aside className={`np-panel is-${mode}`} aria-label="Now playing">
       <div className="np-top">
         {mode === 'overlay' ? (
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close now playing">
@@ -861,9 +830,7 @@ function NowPlaying({ mode, track, isPlaying, isLiked, onLike, contextLabel, upN
           <small>Playing from</small>
           <strong>{contextLabel}</strong>
         </div>
-        <button type="button" className="icon-btn np-fullscreen-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit full screen player' : 'Open full screen player'}>
-          <Icon name={isFullscreen ? 'minimize' : 'maximize'} size={18} />
-        </button>
+        <span className="np-spacer" />
       </div>
 
       <div className="np-art">
@@ -1548,7 +1515,6 @@ export default function App() {
     setView(id);
     setNowPlayingOpen(false);
     setFullPlayerOpen(false);
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   };
 
   const openPlaylist = (id) => {
@@ -1571,7 +1537,6 @@ export default function App() {
     if (panelMode) {
       setNowPlayingOpen(false);
       setFullPlayerOpen(false);
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       return;
     }
     setFullPlayerOpen(true);
@@ -1581,7 +1546,6 @@ export default function App() {
     if (!current) return;
     setFullPlayerOpen(true);
     setNowPlayingOpen(false);
-    document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
   const upNext = queue.slice(pos + 1, pos + 6).map((track, offset) => ({ track, index: pos + 1 + offset }));
@@ -2185,7 +2149,6 @@ export default function App() {
           onClose={() => {
             setNowPlayingOpen(false);
             setFullPlayerOpen(false);
-            if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
           }}
           position={position}
           total={total}
