@@ -7,7 +7,41 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
+const CATALOG_CACHE_KEY = 'sonara.web.catalog.v1';
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
+
+const fallbackCatalog = [
+  { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
+  { id: 'seed-dream-state', title: 'Dream State', artist: 'North Echo', album: 'Late Bloom', seconds: 201, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', addedAt: Date.now() - 2000 },
+  { id: 'seed-sunset-loop', title: 'Sunset Loop', artist: 'Glass Harbor', album: 'Warm Static', seconds: 246, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', addedAt: Date.now() - 3000 },
+  { id: 'seed-hollow-glow', title: 'Hollow Glow', artist: 'Daybreak Ritual', album: 'Low Tide', seconds: 218, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', addedAt: Date.now() - 4000 },
+  { id: 'seed-velvet-run', title: 'Velvet Run', artist: 'Cinder Avenue', album: 'Night Circuit', seconds: 247, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', addedAt: Date.now() - 5000 },
+  { id: 'seed-lunar-kite', title: 'Lunar Kite', artist: 'Harbor Echo', album: 'Cassette Air', seconds: 261, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', addedAt: Date.now() - 6000 }
+];
+
+const getCachedCatalog = () => {
+  try {
+    const raw = window.localStorage.getItem(CATALOG_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const getDefaultCatalog = () => {
+  const cached = getCachedCatalog();
+  return cached.length ? cached : fallbackCatalog;
+};
+
+const saveCachedCatalog = (songs) => {
+  try {
+    window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(songs));
+  } catch {
+    // storage is unavailable, ignore gracefully
+  }
+};
 
 const getUserDisplayName = (user) => {
   if (!user) return 'Listener';
@@ -1142,15 +1176,31 @@ export default function App() {
   /* ------------------------------ data ------------------------------ */
 
   const fetchCatalog = useCallback(async () => {
+    const seededCatalog = getDefaultCatalog();
+    setCatalog(seededCatalog);
+    saveCachedCatalog(seededCatalog);
+    setServerOnline(false);
+
     try {
       const response = await fetch(`${apiBase}/catalog`);
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const payload = await response.json();
       const songs = Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : [];
+      if (!songs.length) {
+        setCatalog(seededCatalog);
+        saveCachedCatalog(seededCatalog);
+        setServerOnline(false);
+        return;
+      }
+
       setCatalog(songs);
+      saveCachedCatalog(songs);
       setServerOnline(true);
     } catch (error) {
       console.error('Unable to load catalog', error);
+      const activeCatalog = getDefaultCatalog();
+      setCatalog(activeCatalog);
+      saveCachedCatalog(activeCatalog);
       setServerOnline(false);
     }
   }, []);
@@ -1647,6 +1697,10 @@ export default function App() {
               <i className="live-dot" aria-hidden="true" />
               {greeting()}, {getUserDisplayName(authUser)}
             </p>
+            <div className="hero-intro">
+              <span className="hero-kicker">Sonara</span>
+              <h1>Set the tone for the next hour.</h1>
+            </div>
             <div className="feature-panel">
               <div className="feature-art">
                 <SleeveStack track={spotlightTrack} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
@@ -1667,6 +1721,17 @@ export default function App() {
               <div className="mini-feature-header">
                 <span>Recently played</span>
                 <button type="button" className="text-btn" onClick={() => goTo('all-music')}>View all</button>
+              </div>
+              <div className="mini-feature-highlight">
+                {(recentTracks[0] || allTracks[0]) && (
+                  <button type="button" className="mini-feature-spotlight" onClick={() => {
+                    const firstTrack = recentTracks[0] || allTracks[0];
+                    if (!firstTrack) return;
+                    playFromList(allTracks, allTracks.findIndex((item) => item.id === firstTrack.id), 'Recently played');
+                  }}>
+                    <CoverArt track={recentTracks[0] || allTracks[0]} size="lg" />
+                  </button>
+                )}
               </div>
               <div className="mini-feature-grid">
                 {(recentTracks.slice(0, 4).length ? recentTracks.slice(0, 4) : allTracks.slice(0, 4)).map((track) => (
@@ -2204,12 +2269,14 @@ export default function App() {
             </button>
           )}
           {authUser ? (
-            <div className="user-pill">
-              <button type="button" className="user-badge" onClick={() => goTo('home')} aria-label="Signed in as user">
-                <span className="user-avatar" aria-hidden="true"><Icon name="user" size={14} /></span>
-                {getUserDisplayName(authUser)}
-              </button>
-              <button type="button" className="text-btn user-signout" onClick={handleSignOut}>Sign out</button>
+            <div className="user-shell">
+              <div className="user-pill">
+                <button type="button" className="user-badge" onClick={() => goTo('home')} aria-label="Signed in as user">
+                  <span className="user-avatar" aria-hidden="true"><Icon name="user" size={14} /></span>
+                  {getUserDisplayName(authUser)}
+                </button>
+              </div>
+              <button type="button" className="user-signout" onClick={handleSignOut}>Sign out</button>
             </div>
           ) : (
             <button type="button" className="btn btn-primary" onClick={() => { setAuthReason('Sign in to unlock your library and sync favorites.'); setAuthOpen(true); }}>
