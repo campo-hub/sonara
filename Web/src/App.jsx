@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
-const USER_NAME = 'John';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
-const DAY = 24 * 60 * 60 * 1000;
+
+const getUserDisplayName = (user) => {
+  if (!user) return 'Listener';
+  if (user.displayName) return user.displayName.trim();
+  if (user.email) return user.email.split('@')[0] || 'Listener';
+  return 'Listener';
+};
 
 /* Uploads run in groups so huge selections stay fast and cancellable. */
 const BATCH_OPTIONS = [5, 10, 25, 50];
@@ -27,6 +33,7 @@ const navItems = [
 ];
 
 const mobileTabs = ['home', 'library', 'all-music', 'lab'];
+const protectedViews = new Set(['upload', 'playlists', 'favorites']);
 
 const pageMeta = {
   library: { title: 'Library', subtitle: 'Everything you have saved, in one place.' },
@@ -61,45 +68,10 @@ const defaultPrefs = {
   compact: false,
   spin: true,
   volume: 0.8,
-  liked: ['sample-dimension', 'sample-a-different-way', 'sample-again', 'sample-7-years']
+  liked: []
 };
 
-/* Sample library. Replace with your own data or rely on the /catalog API. */
-const starterTracks = [
-  { id: 'sample-dimension', title: 'Dimension (feat. Skepta & Rema)', artist: 'JAE5, Skepta, Rema', seconds: 234, age: 1 },
-  { id: 'sample-a-different-way', title: 'A Different Way (with Lauv)', artist: 'DJ Snake, Lauv', seconds: 198, age: 2 },
-  { id: 'sample-again', title: 'Again', artist: 'Wande Coal', seconds: 156, age: 3 },
-  { id: 'sample-ahiurania', title: 'Ahiurania', artist: 'Nd Githuka', seconds: 350, age: 4 },
-  { id: 'sample-7-years', title: '7 Years', artist: 'Lukas Graham', seconds: 237, age: 5 },
-  { id: 'sample-3-15', title: '3:15 (Breathe)', artist: 'Russ', seconds: 184, age: 6 },
-  { id: 'sample-11th-hour', title: '11Th Hour', artist: 'Betty Bayo', seconds: 313, age: 7 }
-].map(({ age, ...track }) => ({
-  ...track,
-  album: 'Singles',
-  cover: '',
-  src: '',
-  addedAt: Date.now() - age * DAY
-}));
-
 const defaultPlaylists = [
-  {
-    id: 'daily-mix',
-    name: 'Daily Mix',
-    description: 'Fresh picks for right now',
-    trackIds: ['sample-dimension', 'sample-a-different-way', 'sample-again', 'sample-7-years']
-  },
-  {
-    id: 'focus-flow',
-    name: 'Focus Flow',
-    description: 'Steady tracks for deep work',
-    trackIds: ['sample-3-15', 'sample-7-years', 'sample-again']
-  },
-  {
-    id: 'late-night',
-    name: 'Late Night',
-    description: 'Slow and low after dark',
-    trackIds: ['sample-11th-hour', 'sample-ahiurania', 'sample-dimension']
-  },
   { id: 'uploads', name: 'Uploads', description: 'Everything you have uploaded', dynamic: 'uploads', trackIds: [] }
 ];
 
@@ -208,7 +180,7 @@ const normalizeTrack = (item, index = 0) => {
     title: item?.title || 'Untitled track',
     artist: item?.artist || 'Unknown artist',
     album: item?.album || 'Singles',
-    seconds: seconds > 0 ? seconds : 198,
+    seconds,
     cover: resolveAssetUrl(item?.cover || item?.artwork || item?.coverUrl),
     src: resolveAssetUrl(item?.audioUrl || item?.streamUrl || item?.url || item?.src || item?.fileUrl),
     addedAt: Date.parse(item?.createdAt || item?.uploadedAt || '') || Date.now() - index * 1000
@@ -276,11 +248,12 @@ const readEntry = (entry) =>
     resolve([]);
   });
 
-const sendUpload = (formData, onProgress, run) =>
+const sendUpload = (formData, onProgress, run, token) =>
   new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     if (run) run.abort = () => request.abort();
     request.open('POST', `${apiBase}/uploads/bulk`);
+    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
     request.timeout = 15 * 60 * 1000;
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded / event.total);
@@ -693,6 +666,52 @@ function EmptyState({ icon = 'music', title, text, action }) {
   );
 }
 
+function AuthDialog({ mode, reason, onClose, onSignedIn, onModeChange }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const finish = (result) => onSignedIn(result.user);
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      finish(mode === 'register' ? await createAccountWithEmail(email, password) : await signInWithEmail(email, password));
+    } catch (authError) {
+      setError(authError?.message || 'Authentication failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const google = async () => {
+    setBusy(true);
+    setError('');
+    try { finish(await signInWithGoogle()); } catch (authError) { setError(authError?.message || 'Google sign-in failed.'); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="auth-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <button type="button" className="icon-btn auth-close" onClick={onClose} aria-label="Close authentication"><Icon name="x" size={20} /></button>
+        <span className="auth-kicker">Sonara account</span>
+        <h2 id="auth-title">{mode === 'register' ? 'Create your account' : 'Welcome back'}</h2>
+        <p className="auth-reason">{reason}</p>
+        <button type="button" className="btn auth-google" onClick={google} disabled={busy || !isFirebaseConfigured}>Continue with Google</button>
+        <div className="auth-divider"><span>or use email</span></div>
+        <form onSubmit={submit}>
+          <label className="auth-field"><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+          <label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength="6" required /></label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <button type="submit" className="btn btn-primary btn-wide" disabled={busy || !isFirebaseConfigured}>{busy ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Sign in'}</button>
+        </form>
+        <button type="button" className="text-btn auth-switch" onClick={() => onModeChange(mode === 'register' ? 'signin' : 'register')}>{mode === 'register' ? 'Already have an account? Sign in' : 'New to Sonara? Create an account'}</button>
+      </section>
+    </div>
+  );
+}
+
 function SeekBar({ position, total, onSeek, disabled }) {
   const max = Math.max(total, 1);
   const percent = Math.min(100, (position / max) * 100);
@@ -974,6 +993,31 @@ export default function App() {
   const [prefs, setPrefs] = useState(loadPrefs);
   const [notice, setNotice] = useState('');
   const [stageOpen, setStageOpen] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
+  const [authReason, setAuthReason] = useState('Sign in to unlock this feature.');
+  const [userPlaylists, setUserPlaylists] = useState([]);
+  const [libraryHydrated, setLibraryHydrated] = useState(false);
+
+  const handleAuthSuccess = useCallback((user) => {
+    setAuthUser(user);
+    setAuthOpen(false);
+    setAuthMode('signin');
+    setAuthReason('Sign in to unlock this feature.');
+    if (user) setNotice(`Welcome back, ${getUserDisplayName(user)}.`);
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOutUser();
+    } finally {
+      setAuthUser(null);
+      setUserPlaylists([]);
+      setLibraryHydrated(false);
+      setNotice('Signed out.');
+    }
+  }, []);
 
   /* catalog + upload */
   const [catalog, setCatalog] = useState([]);
@@ -987,10 +1031,10 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
 
   /* player */
-  const initialQueue = useMemo(() => [...starterTracks].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })), []);
+  const initialQueue = useMemo(() => [], []);
   const [queue, setQueue] = useState(initialQueue);
   const [queueBase, setQueueBase] = useState(initialQueue);
-  const [pos, setPos] = useState(() => Math.max(0, initialQueue.findIndex((track) => track.id === 'sample-dimension')));
+  const [pos, setPos] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -1011,6 +1055,68 @@ export default function App() {
   const uploadPercent = Math.floor(queueFraction(uploadQueue) * 100);
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
 
+  useEffect(() => subscribeToAuth(setAuthUser), []);
+
+  useEffect(() => {
+    let active = true;
+    if (!authUser) {
+      setLibraryHydrated(false);
+      setUserPlaylists([]);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const response = await authenticatedJsonRequest(`${apiBase}/me/library`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load your library.');
+        if (!active) return;
+        setPrefs((previous) => ({
+          ...previous,
+          ...(data.preferences || {}),
+          liked: Array.isArray(data.preferences?.liked) ? data.preferences.liked : previous.liked
+        }));
+        setUserPlaylists(Array.isArray(data.playlists) ? data.playlists : []);
+      } catch (error) {
+        if (active) setNotice(error.message || 'Unable to load your library.');
+      } finally {
+        if (active) setLibraryHydrated(true);
+      }
+    })();
+    return () => { active = false; };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser || !libraryHydrated) return;
+    const syncUserLibrary = async () => {
+      try {
+        const payload = {
+          preferences: {
+            theme: prefs.theme,
+            accent: prefs.accent,
+            customAccent: prefs.customAccent,
+            waveforms: prefs.waveforms,
+            compact: prefs.compact,
+            spin: prefs.spin,
+            volume: prefs.volume,
+            liked: prefs.liked
+          },
+          playlists: userPlaylists
+        };
+        const response = await authenticatedJsonRequest(`${apiBase}/me/library`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Unable to sync your library.');
+        }
+      } catch (error) {
+        setNotice(error.message || 'Unable to sync your library.');
+      }
+    };
+    syncUserLibrary();
+  }, [authUser, libraryHydrated, prefs, userPlaylists]);
+
   const current = queue[pos] || null;
   const total = audioDuration || current?.seconds || 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
@@ -1018,12 +1124,20 @@ export default function App() {
 
   const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
 
+  const requireAuth = useCallback((reason) => {
+    if (authUser) return true;
+    setAuthReason(reason);
+    setAuthOpen(true);
+    return false;
+  }, [authUser]);
+
   const toggleLike = useCallback((id) => {
+    if (!requireAuth('Sign in to save favorites to your account.')) return;
     setPrefs((previous) => ({
       ...previous,
       liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
     }));
-  }, []);
+  }, [requireAuth]);
 
   /* ------------------------------ data ------------------------------ */
 
@@ -1046,7 +1160,7 @@ export default function App() {
   }, [fetchCatalog]);
 
   const catalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
-  const allTracks = useMemo(() => [...starterTracks, ...catalogTracks], [catalogTracks]);
+  const allTracks = catalogTracks;
   const trackById = useMemo(() => new Map(allTracks.map((track) => [track.id, track])), [allTracks]);
 
   const recentUploads = useMemo(() => {
@@ -1056,11 +1170,11 @@ export default function App() {
 
   const playlists = useMemo(
     () =>
-      defaultPlaylists.map((playlist) => ({
+      [...defaultPlaylists, ...userPlaylists.filter((playlist) => playlist.id !== 'uploads')].map((playlist) => ({
         ...playlist,
         tracks: playlist.dynamic === 'uploads' ? catalogTracks : playlist.trackIds.map((id) => trackById.get(id)).filter(Boolean)
       })),
-    [catalogTracks, trackById]
+    [catalogTracks, trackById, userPlaylists]
   );
   const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0];
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
@@ -1297,21 +1411,6 @@ export default function App() {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : prefs.volume;
   }, [muted, prefs.volume]);
 
-  /* demo playback for tracks without an audio file */
-  useEffect(() => {
-    if (!isPlaying || !current || current.src) return undefined;
-    const timer = setInterval(() => setPosition((value) => Math.min(value + 0.25, current.seconds)), 250);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, current?.id]);
-
-  useEffect(() => {
-    if (isPlaying && current && !current.src && current.seconds > 0 && position >= current.seconds) {
-      advanceRef.current(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position, isPlaying, current?.id]);
-
   /* keyboard + media keys */
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -1492,6 +1591,11 @@ export default function App() {
   /* ------------------------------ navigation ------------------------------ */
 
   const goTo = (id) => {
+    if (protectedViews.has(id) && !authUser) {
+      setAuthReason(`Sign in to access ${pageMeta[id]?.title || 'this feature'}.`);
+      setAuthOpen(true);
+      return;
+    }
     setView(id);
     setStageOpen(false);
   };
@@ -1540,7 +1644,7 @@ export default function App() {
           <div className="hero-copy">
             <p className="greeting">
               <i className="live-dot" aria-hidden="true" />
-              {greeting()}, {USER_NAME}
+              {greeting()}, {getUserDisplayName(authUser)}
             </p>
             <h1>What do you want to hear?</h1>
             <p className="hero-sub">Let Sonara set the vibe.</p>
@@ -2079,6 +2183,19 @@ export default function App() {
               Uploading {formatCount(uploadQueue.done)} / {formatCount(uploadQueue.total)}
             </button>
           )}
+          {authUser ? (
+            <div className="user-pill">
+              <button type="button" className="user-badge" onClick={() => goTo('home')} aria-label="Signed in as user">
+                <span className="user-avatar" aria-hidden="true"><Icon name="user" size={14} /></span>
+                {getUserDisplayName(authUser)}
+              </button>
+              <button type="button" className="text-btn user-signout" onClick={handleSignOut}>Sign out</button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-primary" onClick={() => { setAuthReason('Sign in to unlock your library and sync favorites.'); setAuthOpen(true); }}>
+              Sign in
+            </button>
+          )}
           <button type="button" className={`btn-add ${view === 'upload' ? 'is-active' : ''}`} onClick={() => goTo('upload')} aria-label="Add music">
             <Icon name="plus" size={18} />
             <span>Add music</span>
@@ -2191,6 +2308,16 @@ export default function App() {
             </button>
           ))}
       </nav>
+
+      {authOpen && (
+        <AuthDialog
+          mode={authMode}
+          reason={authReason}
+          onClose={() => setAuthOpen(false)}
+          onSignedIn={handleAuthSuccess}
+          onModeChange={setAuthMode}
+        />
+      )}
 
       {notice && (
         <div className="toast" role="status">
