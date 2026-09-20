@@ -1637,29 +1637,49 @@ export default function App() {
         open: () => openPlaylist(playlist.id)
       }))
     ];
+    const spotlightTrack = current || recentTracks[0] || favoriteTracks[0] || allTracks[0];
 
     return (
       <>
         <section className="hero">
-          <div className="hero-copy">
+          <div className="hero-copy hero-copy-featured">
             <p className="greeting">
               <i className="live-dot" aria-hidden="true" />
               {greeting()}, {getUserDisplayName(authUser)}
             </p>
-            <h1>What do you want to hear?</h1>
-            <p className="hero-sub">Let Sonara set the vibe.</p>
-            <DjButton active={djOn} onClick={toggleDj} />
+            <div className="feature-panel">
+              <div className="feature-art">
+                <SleeveStack track={spotlightTrack} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
+              </div>
+              {spotlightTrack && (
+                <div className="feature-meta">
+                  <span className="feature-kicker">Now spinning</span>
+                  <strong>{spotlightTrack.title}</strong>
+                  <small>{spotlightTrack.artist}</small>
+                </div>
+              )}
+              <DjButton active={djOn} onClick={toggleDj} className="feature-dj" />
+            </div>
           </div>
 
-          <div className="hero-visual">
-            <SleeveStack track={current} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
-            {current && (
-              <p className="hero-caption">
-                <span>{isPlaying ? 'Now spinning' : 'Ready on the deck'}</span>
-                <strong>{current.title}</strong>
-                <em>{current.artist}</em>
-              </p>
-            )}
+          <div className="hero-visual hero-visual-featured">
+            <div className="mini-feature-card">
+              <div className="mini-feature-header">
+                <span>Recently played</span>
+                <button type="button" className="text-btn" onClick={() => goTo('all-music')}>View all</button>
+              </div>
+              <div className="mini-feature-grid">
+                {(recentTracks.slice(0, 4).length ? recentTracks.slice(0, 4) : allTracks.slice(0, 4)).map((track) => (
+                  <button key={track.id} type="button" className="mini-feature-tile" onClick={() => playFromList(allTracks, allTracks.findIndex((item) => item.id === track.id), 'Recently played')}>
+                    <CoverArt track={track} size="sm" />
+                    <span>
+                      <strong>{track.title}</strong>
+                      <small>{formatTime(track.seconds)}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 

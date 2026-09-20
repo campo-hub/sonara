@@ -12,9 +12,10 @@
     "@aws-sdk/client-s3": "^3.679.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "firebase-admin": "^13.5.0",
     "express": "^4.21.2",
+    "firebase-admin": "^13.5.0",
     "mongodb": "^6.20.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "music-metadata": "^11.15.0"
   }
 }

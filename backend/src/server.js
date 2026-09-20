@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 import admin from 'firebase-admin';
 import multer from 'multer';
 import { MongoClient } from 'mongodb';
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import * as mm from 'music-metadata';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
 
 dotenv.config();
@@ -233,7 +234,36 @@ function buildCoverMap(files = []) {
   return coversByFolder;
 }
 
-function buildUploadedTrack(file, index, cover, audioUrl) {
+async function getAudioDurationFromBuffer(buffer, mimeType = 'application/octet-stream') {
+  try {
+    const metadata = await mm.parseBuffer(buffer, mimeType, { skipCovers: true });
+    return Number(metadata?.format?.duration) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function getAudioDurationFromObjectKey(objectKey) {
+  if (!r2Client || !r2BucketName) return 0;
+
+  try {
+    const response = await r2Client.send(new GetObjectCommand({
+      Bucket: r2BucketName,
+      Key: objectKey
+    }));
+
+    const chunks = [];
+    for await (const chunk of response.Body || []) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    return getAudioDurationFromBuffer(buffer, 'audio/mpeg');
+  } catch {
+    return 0;
+  }
+}
+
+function buildUploadedTrack(file, index, cover, audioUrl, duration = 0) {
   const sourcePath = file.webkitRelativePath || file.originalname || 'upload';
   const folderPath = sourcePath.includes('/') ? sourcePath.split('/').slice(0, -1).join('/') : '';
   const metadata = parseTrackMetadata((sourcePath.split('/').at(-1) || file.originalname || 'track'), folderPath);
@@ -243,7 +273,7 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
-    duration: 0,
+    duration,
     cover: cover || '',
     audioUrl: audioUrl || '',
     source: 'upload',
@@ -251,7 +281,7 @@ function buildUploadedTrack(file, index, cover, audioUrl) {
   };
 }
 
-function buildBucketTrackFromKey(objectKey, coverKey = '') {
+function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
   const normalized = String(objectKey || '').replace(/^\/+/, '');
   const segments = normalized.split('/').filter(Boolean);
   const fileName = segments.at(-1) || 'track';
@@ -262,7 +292,7 @@ function buildBucketTrackFromKey(objectKey, coverKey = '') {
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
-    duration: 0,
+    duration,
     cover: coverKey ? buildPublicUrl(coverKey, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`) : '',
     audioUrl: buildPublicUrl(normalized, r2PublicBaseUrl || `${r2Endpoint}/${r2BucketName}`),
     source: 'bucket',
@@ -286,13 +316,14 @@ async function loadCatalogFromBucket() {
     const imageKeys = keys.filter((key) => isImageFile(key));
     const audioItems = keys.filter((key) => isAudioFile(key));
 
-    return audioItems.map((key) => {
+    return Promise.all(audioItems.map(async (key) => {
       const folder = getParentFolder(key);
       const coverKey = imageKeys.find((candidate) => {
         return getParentFolder(candidate) === folder;
       }) || '';
-      return buildBucketTrackFromKey(key, coverKey);
-    });
+      const duration = await getAudioDurationFromObjectKey(key);
+      return buildBucketTrackFromKey(key, coverKey, duration);
+    }));
   } catch (error) {
     console.error('Unable to list Cloudflare R2 catalog:', error);
     return [];
@@ -391,7 +422,8 @@ app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
     const parsedTracks = await Promise.all(audioFiles.map(async (file, index) => {
       const objectKey = resolveUploadPath(file, 'uploads');
       const uploadResult = await uploadToR2(file, objectKey);
-      return buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url);
+      const duration = await getAudioDurationFromBuffer(file.buffer, file.mimetype || 'application/octet-stream');
+      return buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url, duration);
     }));
 
     uploadedTracks.unshift(...parsedTracks);
