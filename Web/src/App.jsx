@@ -5,78 +5,111 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const apiBase = (() => {
-  const configured = import.meta.env.VITE_API_URL;
-  const isLocalDev = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  if (isLocalDev) return 'http://localhost:4000/api';
-  return configured || 'https://sonara-senm.onrender.com/api';
-})();
+const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
-const CATALOG_CACHE_KEY = 'sonara.web.catalog.v1';
+const CATALOG_CACHE_KEY = 'sonara.web.catalog.v2';
+const LEGACY_CATALOG_CACHE_KEYS = ['sonara.web.catalog.v1'];
+const CATALOG_TIMEOUT_MS = 30000;
+const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
-const CATALOG_FETCH_TIMEOUT_MS = 2500;
 
-const fallbackCatalog = [];
-const PLACEHOLDER_CATALOG_TITLES = new Set([
-  'sonara # set the tone for the next hour'
-]);
+const fallbackCatalog = [
+  { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
+  { id: 'seed-dream-state', title: 'Dream State', artist: 'North Echo', album: 'Late Bloom', seconds: 201, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', addedAt: Date.now() - 2000 },
+  { id: 'seed-sunset-loop', title: 'Sunset Loop', artist: 'Glass Harbor', album: 'Warm Static', seconds: 246, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', addedAt: Date.now() - 3000 },
+  { id: 'seed-hollow-glow', title: 'Hollow Glow', artist: 'Daybreak Ritual', album: 'Low Tide', seconds: 218, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', addedAt: Date.now() - 4000 },
+  { id: 'seed-velvet-run', title: 'Velvet Run', artist: 'Cinder Avenue', album: 'Night Circuit', seconds: 247, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', addedAt: Date.now() - 5000 },
+  { id: 'seed-lunar-kite', title: 'Lunar Kite', artist: 'Harbor Echo', album: 'Cassette Air', seconds: 261, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', addedAt: Date.now() - 6000 }
+];
 
-const PLACEHOLDER_CATALOG_ARTISTS = new Set([
-  'sonara studio'
-]);
-
-const isPlaceholderCatalogEntry = (song) => {
-  const id = String(song?.id ?? song?._id ?? '').trim().toLowerCase();
-  const title = String(song?.title ?? '').trim().toLowerCase();
-  const artist = String(song?.artist ?? '').trim().toLowerCase();
-  const source = `${id} ${title} ${artist} ${song?.album ?? ''} ${song?.description ?? ''}`.toLowerCase();
-
-  if (song?.source === 'fallback' || song?.source === 'bucket' || song?.source === 'upload') {
-    return false;
-  }
-  if (id.startsWith('seed-')) return true;
-  if (PLACEHOLDER_CATALOG_TITLES.has(title)) return true;
-  if (PLACEHOLDER_CATALOG_ARTISTS.has(artist)) return true;
-  if (source.includes('sonara #') || source.includes('set the tone for the next hour')) return true;
-  return false;
-};
-
-const sanitizeCatalog = (songs) => {
-  if (!Array.isArray(songs)) return [];
-  return songs.filter((song) => !isPlaceholderCatalogEntry(song));
-};
+/* Sample songs are only ever shown, never saved as if they were the user's library. */
+const isSampleCatalog = (songs) => Array.isArray(songs) && songs.some((song) => String(song?.id || '').startsWith('seed-'));
 
 const getCachedCatalog = () => {
   try {
+    /* v1 wrongly stored the sample songs, so throw that cache away. */
+    LEGACY_CATALOG_CACHE_KEYS.forEach((key) => window.localStorage.removeItem(key));
     const raw = window.localStorage.getItem(CATALOG_CACHE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    const sanitized = sanitizeCatalog(parsed);
-    if (sanitized.length !== (Array.isArray(parsed) ? parsed.length : 0)) {
-      window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(sanitized));
+    if (!Array.isArray(parsed) || isSampleCatalog(parsed)) {
+      window.localStorage.removeItem(CATALOG_CACHE_KEY);
+      return [];
     }
-    return sanitized;
+    return parsed;
   } catch {
     return [];
   }
 };
 
-const getDefaultCatalog = () => getCachedCatalog();
-
 const saveCachedCatalog = (songs) => {
   try {
+    if (!Array.isArray(songs) || !songs.length || isSampleCatalog(songs)) return;
     window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(songs));
   } catch {
     // storage is unavailable, ignore gracefully
   }
 };
 
-const clearCatalogCache = () => {
+const clearCachedCatalog = () => {
   try {
     window.localStorage.removeItem(CATALOG_CACHE_KEY);
   } catch {
     // storage is unavailable, ignore gracefully
   }
+};
+
+/* Accepts the shapes a backend commonly returns: [..], { songs }, { tracks }, { items }, { data: { songs } } ... */
+const CATALOG_KEYS = ['songs', 'tracks', 'items', 'data', 'catalog', 'results'];
+const pickSongs = (payload, depth = 0) => {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object' || depth > 2) return [];
+  for (const key of CATALOG_KEYS) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') {
+      const nested = pickSongs(value, depth + 1);
+      if (nested.length) return nested;
+    }
+  }
+  return [];
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const requestWithTimeout = async (url, ms) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/* The two setup mistakes that most often make a deployed site look "broken". */
+const describeConfigProblem = () => {
+  try {
+    const local = ['localhost', '127.0.0.1', '[::1]'];
+    const target = new URL(apiBase, window.location.href);
+    if (local.includes(target.hostname) && !local.includes(window.location.hostname)) {
+      return `This build calls ${target.origin}, which only exists on your own computer. Set VITE_API_URL to your Render URL (ending in /api) and rebuild.`;
+    }
+    if (window.location.protocol === 'https:' && target.protocol === 'http:') {
+      return 'This page is https but the API address is http, so the browser blocks it. Use the https URL in VITE_API_URL.';
+    }
+  } catch {
+    /* ignore */
+  }
+  return '';
+};
+
+const explainCatalogError = (error) => {
+  if (error?.status === 404) return `The server answered 404, so ${apiBase}/catalog is not a route it knows. Check the URL and that /api is included.`;
+  if (error?.status >= 500) return `The server answered ${error.status}. It may still be starting up, or it crashed. Check the Render logs.`;
+  if (error?.status) return `The server answered ${error.status}.`;
+  if (error?.name === 'AbortError') return 'The server took too long to answer. Render free plans can need up to a minute to wake up.';
+  return `The browser could not reach ${apiBase}/catalog. Check VITE_API_URL, and that the server allows this site in its CORS settings.`;
 };
 
 const getUserDisplayName = (user) => {
@@ -161,11 +194,6 @@ const parseTime = (value) => {
   return parts.reduce((total, part) => total * 60 + part, 0);
 };
 
-const getTrackSeconds = (track) => {
-  const raw = Number(track?.seconds ?? track?.duration ?? track?.length ?? track?.runtime ?? 0);
-  return Number.isFinite(raw) ? raw : 0;
-};
-
 const formatBytes = (bytes) => {
   if (!bytes) return '0 KB';
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -193,8 +221,7 @@ const queueFraction = (queue) => {
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 const totalRuntime = (tracks) => {
-  const totalSeconds = tracks.reduce((sum, track) => sum + getTrackSeconds(track), 0);
-  const minutes = Math.round(totalSeconds / 60);
+  const minutes = Math.round(tracks.reduce((sum, track) => sum + track.seconds, 0) / 60);
   return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min`;
 };
 
@@ -241,29 +268,23 @@ const readableOn = (hex) => {
 const resolveAssetUrl = (value) => {
   if (!value || typeof value !== 'string') return '';
   if (/^(https?:|data:|blob:)/i.test(value)) return value;
-  if (!value.startsWith('/')) return '';
+  if (value.startsWith('#') || !/[/.\\]/.test(value)) return '';
   try {
-    return new URL(value, new URL(apiBase, window.location.href).origin).toString();
+    const path = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    return new URL(path.startsWith('/') ? path : `/${path}`, new URL(apiBase, window.location.href).origin).toString();
   } catch {
     return '';
   }
 };
 
-const getCatalogIdentity = (item) => {
-  const raw = item?.id ?? item?._id ?? item?.songId ?? item?.audioUrl ?? item?.src ?? item?.url ?? item?.fileUrl ?? item?.key ?? item?.fileKey ?? '';
-  return String(raw || '').trim();
-};
-
 const normalizeTrack = (item, index = 0) => {
-  const seconds = parseTime(item?.duration ?? item?.seconds ?? item?.length ?? item?.runtime ?? 0);
-  const rawIdentity = getCatalogIdentity(item);
+  const seconds = parseTime(item?.duration ?? item?.seconds);
   return {
-    id: rawIdentity || `catalog-${index}`,
+    id: String(item?.id ?? item?._id ?? `catalog-${index}`),
     title: item?.title || 'Untitled track',
     artist: item?.artist || 'Unknown artist',
     album: item?.album || 'Singles',
     seconds,
-    duration: seconds,
     cover: resolveAssetUrl(item?.cover || item?.artwork || item?.coverUrl),
     src: resolveAssetUrl(item?.audioUrl || item?.streamUrl || item?.url || item?.src || item?.fileUrl),
     addedAt: Date.parse(item?.createdAt || item?.uploadedAt || '') || Date.now() - index * 1000
@@ -776,6 +797,26 @@ const tintFor = (track) => {
   return { bg: base, fg: readableOn(base) === '#0e0e0e' ? '#16150F' : '#F6EFE0' };
 };
 
+/* Says plainly when the songs on screen are samples or a saved copy, and why. */
+function CatalogNotice({ status, onRetry }) {
+  if (!status || status.state === 'ready') return null;
+  if (status.state === 'loading' && !status.message) return null;
+  const titles = { loading: 'Reaching the server…', cached: 'Showing your last saved library', sample: 'Showing sample songs' };
+  return (
+    <div className={`catalog-notice is-${status.state}`} role="status">
+      <div>
+        <strong>{titles[status.state]}</strong>
+        <span>{status.message}</span>
+      </div>
+      {status.state !== 'loading' && (
+        <button type="button" className="btn btn-compact" onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PageBanner({ id, title, subtitle }) {
   const style = BANNER_STYLES[id] || BANNER_STYLES.library;
   return (
@@ -912,7 +953,7 @@ function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLik
               <i className="tl-dots" />
               {showWaveform && <Waveform seed={hashString(track.id)} active={isCurrent} />}
             </span>
-            <span className="tl-time" aria-label="Track duration unavailable" title="Track duration unavailable"></span>
+            <span className="tl-time">{formatTime(track.seconds)}</span>
             <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
               <Icon name="heart" size={19} filled={isLiked} />
             </button>
@@ -1088,7 +1129,7 @@ function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, 
                         <strong>{item.title}</strong>
                         <small>{item.artist}</small>
                       </span>
-                      <em aria-label="Track duration unavailable" title="Track duration unavailable"></em>
+                      <em>{formatTime(item.seconds)}</em>
                     </button>
                   </li>
                 ))}
@@ -1148,6 +1189,8 @@ export default function App() {
   const [catalog, setCatalog] = useState([]);
   const [sessionUploads, setSessionUploads] = useState([]);
   const [serverOnline, setServerOnline] = useState(null);
+  const [catalogStatus, setCatalogStatus] = useState({ state: 'loading', message: '' });
+  const catalogRequestRef = useRef(0);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadMode, setUploadMode] = useState('files');
   const [uploadMessage, setUploadMessage] = useState(null);
@@ -1243,34 +1286,7 @@ export default function App() {
   }, [authUser, libraryHydrated, prefs, userPlaylists]);
 
   const current = queue[pos] || null;
-  const total = Number.isFinite(audioDuration) && audioDuration > 0
-    ? audioDuration
-    : Number.isFinite(current?.seconds) && current.seconds > 0
-      ? current.seconds
-      : Number.isFinite(current?.duration) && current.duration > 0
-        ? current.duration
-        : 0;
-
-  const syncCatalogDuration = useCallback((track, duration) => {
-    if (!track || !Number.isFinite(duration) || duration <= 0) return;
-    const identity = getCatalogIdentity(track);
-    if (!identity) return;
-
-    setCatalog((previous) => {
-      let changed = false;
-      const next = previous.map((song) => {
-        const songIdentity = getCatalogIdentity(song);
-        if (!songIdentity || songIdentity !== identity) return song;
-        if (getTrackSeconds(song) > 0) return song;
-        changed = true;
-        return { ...song, duration, seconds: duration };
-      });
-
-      if (changed) saveCachedCatalog(next);
-      return next;
-    });
-  }, []);
-
+  const total = audioDuration || current?.seconds || 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
 
@@ -1293,39 +1309,65 @@ export default function App() {
 
   /* ------------------------------ data ------------------------------ */
 
-  const fetchCatalog = useCallback(async () => {
-    clearCatalogCache();
-    setCatalog([]);
-    setServerOnline(false);
+  /* Loads the catalog. Real songs are cached; sample songs are only shown, and always with the reason why. */
+  const fetchCatalog = useCallback(async ({ silent = false } = {}) => {
+    catalogRequestRef.current += 1;
+    const requestId = catalogRequestRef.current;
+    const isCurrent = () => catalogRequestRef.current === requestId;
+    const cached = getCachedCatalog();
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), CATALOG_FETCH_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(`${apiBase}/catalog`, { signal: controller.signal });
-      if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
-      const payload = await response.json();
-      const songs = sanitizeCatalog(Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : []);
-      setCatalog(songs);
-      saveCachedCatalog(songs);
-      setServerOnline(Boolean(songs.length));
-    } catch (error) {
-      if (error?.name === 'AbortError') {
-        setCatalog([]);
-        setServerOnline(false);
-        return;
-      }
-
-      console.error('Unable to load catalog', error);
-      setCatalog([]);
-      setServerOnline(false);
-    } finally {
-      window.clearTimeout(timeoutId);
+    if (!silent) {
+      setCatalog((existing) => (existing.length ? existing : cached));
+      setCatalogStatus({ state: 'loading', message: '' });
     }
+
+    let lastError = null;
+    for (let attempt = 0; attempt <= CATALOG_RETRY_DELAYS.length; attempt += 1) {
+      if (attempt > 0) await sleep(CATALOG_RETRY_DELAYS[attempt - 1]);
+      if (!isCurrent()) return;
+      try {
+        const response = await requestWithTimeout(`${apiBase}/catalog`, CATALOG_TIMEOUT_MS);
+        if (!response.ok) {
+          const failure = new Error(`Catalog request failed (${response.status})`);
+          failure.status = response.status;
+          throw failure;
+        }
+        const songs = pickSongs(await response.json());
+        if (!isCurrent()) return;
+        setServerOnline(true);
+        if (!songs.length) {
+          clearCachedCatalog();
+          setCatalog(fallbackCatalog);
+          setCatalogStatus({ state: 'sample', message: 'The server answered, but it has no songs yet. Upload some music and it will replace these samples.' });
+          return;
+        }
+        setCatalog(songs);
+        saveCachedCatalog(songs);
+        setCatalogStatus({ state: 'ready', message: '' });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (error?.status && error.status < 500 && error.status !== 408 && error.status !== 429) break;
+        if (!silent && attempt === 0 && isCurrent()) {
+          setCatalog((existing) => (existing.length ? existing : cached.length ? cached : fallbackCatalog));
+          setCatalogStatus({ state: 'loading', message: 'The server is not answering yet. Retrying…' });
+        }
+      }
+    }
+
+    if (!isCurrent()) return;
+    console.error('Unable to load catalog', lastError);
+    setServerOnline(false);
+    const reason = lastError?.status ? explainCatalogError(lastError) : describeConfigProblem() || explainCatalogError(lastError);
+    setCatalog((existing) => (existing.length && !isSampleCatalog(existing) ? existing : cached.length ? cached : fallbackCatalog));
+    setCatalogStatus({ state: cached.length ? 'cached' : 'sample', message: reason });
   }, []);
 
   useEffect(() => {
     fetchCatalog();
+    return () => {
+      catalogRequestRef.current = -1;
+    };
   }, [fetchCatalog]);
 
   const catalogTracks = useMemo(() => catalog.map(normalizeTrack), [catalog]);
@@ -1357,7 +1399,7 @@ export default function App() {
       name: (a, b) => a.title.localeCompare(b.title, undefined, compare),
       artist: (a, b) => a.artist.localeCompare(b.artist, undefined, compare) || a.title.localeCompare(b.title, undefined, compare),
       added: (a, b) => b.addedAt - a.addedAt,
-      duration: (a, b) => getTrackSeconds(b) - getTrackSeconds(a)
+      duration: (a, b) => b.seconds - a.seconds
     };
     return list.sort(sorters[sortKey]);
   }, [allTracks, query, sortKey]);
@@ -1561,10 +1603,6 @@ export default function App() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !current?.src) return;
-    if (Number.isFinite(audio.duration) && audio.duration > 0) {
-      setAudioDuration(audio.duration);
-      syncCatalogDuration(current, audio.duration);
-    }
     if (isPlaying) {
       const attempt = audio.play();
       if (attempt?.catch) {
@@ -1578,7 +1616,7 @@ export default function App() {
       audio.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, current?.id, syncCatalogDuration]);
+  }, [isPlaying, current?.id]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : prefs.volume;
@@ -1746,7 +1784,7 @@ export default function App() {
       error: lastError,
       remaining: remaining.length
     }));
-    fetchCatalog();
+    fetchCatalog({ silent: true });
   };
 
   const cancelUpload = () => {
@@ -1842,6 +1880,10 @@ export default function App() {
               <i className="live-dot" aria-hidden="true" />
               {greeting()}, {getUserDisplayName(authUser)}
             </p>
+            <div className="hero-intro">
+              <span className="hero-kicker">Sonara</span>
+              <h1>Set the tone for the next hour.</h1>
+            </div>
           </div>
 
           <div className="hero-grid">
@@ -1882,7 +1924,7 @@ export default function App() {
                     <CoverArt track={track} size="sm" />
                     <span>
                       <strong>{track.title}</strong>
-                      <small aria-label="Track duration unavailable" title="Track duration unavailable"></small>
+                      <small>{formatTime(track.seconds)}</small>
                     </span>
                   </button>
                 ))}
@@ -2220,7 +2262,7 @@ export default function App() {
           </ul>
           <p className={`server-status ${serverOnline === false ? 'is-offline' : ''}`}>
             <i />
-            {serverOnline === null ? 'Checking server…' : serverOnline ? 'Connected to the Sonara server' : 'Server unreachable. Uploads will fail until it is back.'}
+            {catalogStatus.state === 'loading' && !catalogStatus.message ? 'Checking server…' : serverOnline ? 'Connected to the Sonara server' : catalogStatus.message || 'Server unreachable. Uploads will fail until it is back.'}
           </p>
         </div>
 
@@ -2370,11 +2412,7 @@ export default function App() {
         ref={audioRef}
         preload="metadata"
         onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-        onLoadedMetadata={(event) => {
-          const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
-          setAudioDuration(dur);
-          syncCatalogDuration(current, dur);
-        }}
+        onLoadedMetadata={(event) => setAudioDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
         onEnded={() => advanceRef.current(true)}
         onError={() => {
           if (current?.src) {
@@ -2441,6 +2479,7 @@ export default function App() {
       </header>
 
       <main className={`page ${view === 'home' ? 'is-home' : ''}`}>
+        <CatalogNotice status={catalogStatus} onRetry={() => fetchCatalog()} />
         {view === 'home' ? (
           renderHome()
         ) : (

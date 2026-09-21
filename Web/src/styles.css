@@ -660,7 +660,8 @@ strong {
   font-size: 15.5px;
 }
 
-.btn-cancel {
+.btn-cancel,
+.btn-compact {
   height: 38px;
   padding: 0 16px;
 }
@@ -2734,8 +2735,10 @@ strong {
   text-align: left;
 }
 
-.deck-empty .deck-disc {
-  width: 52px;
+.deck-disc {
+  display: block;
+  flex: none;
+  width: 60px;
 }
 
 .deck-text {
@@ -2760,10 +2763,6 @@ strong {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.deck-empty-play:hover {
-  opacity: 0.94;
 }
 
 .deck-center {
@@ -3140,28 +3139,10 @@ strong {
     margin-bottom: 20px;
   }
 
-  .hero-grid {
-    justify-items: center;
-    width: 100%;
-  }
-
-  .feature-panel,
-  .mini-feature-card {
-    width: min(100%, 500px);
-    margin: 0 auto;
-  }
-
   .feature-panel {
     grid-template-columns: 1fr;
     gap: 22px;
     padding: 24px 22px 26px;
-    justify-items: center;
-    text-align: center;
-  }
-
-  .feature-side {
-    align-items: center;
-    text-align: center;
   }
 
   .block {
@@ -3369,5 +3350,49 @@ strong {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Catalog notice                                                            */
+/* -------------------------------------------------------------------------- */
+
+.catalog-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding: 14px 18px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+
+.catalog-notice > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.catalog-notice strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.catalog-notice span {
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.catalog-notice.is-sample {
+  border-color: var(--accent);
+}
+
+@media (max-width: 859px) {
+  .catalog-notice {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
