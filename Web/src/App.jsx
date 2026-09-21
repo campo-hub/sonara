@@ -1242,6 +1242,27 @@ export default function App() {
       : Number.isFinite(current?.duration) && current.duration > 0
         ? current.duration
         : 0;
+
+  const syncCatalogDuration = useCallback((track, duration) => {
+    if (!track || !Number.isFinite(duration) || duration <= 0) return;
+    const identity = getCatalogIdentity(track);
+    if (!identity) return;
+
+    setCatalog((previous) => {
+      let changed = false;
+      const next = previous.map((song) => {
+        const songIdentity = getCatalogIdentity(song);
+        if (!songIdentity || songIdentity !== identity) return song;
+        if (getTrackSeconds(song) > 0) return song;
+        changed = true;
+        return { ...song, duration, seconds: duration };
+      });
+
+      if (changed) saveCachedCatalog(next);
+      return next;
+    });
+  }, []);
+
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
 
@@ -1545,6 +1566,10 @@ export default function App() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !current?.src) return;
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      setAudioDuration(audio.duration);
+      syncCatalogDuration(current, audio.duration);
+    }
     if (isPlaying) {
       const attempt = audio.play();
       if (attempt?.catch) {
@@ -1558,7 +1583,7 @@ export default function App() {
       audio.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, current?.id]);
+  }, [isPlaying, current?.id, syncCatalogDuration]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : prefs.volume;
@@ -2353,20 +2378,7 @@ export default function App() {
         onLoadedMetadata={(event) => {
           const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
           setAudioDuration(dur);
-
-          if (!current || dur <= 0) return;
-
-          const currentIdentity = getCatalogIdentity(current);
-          if (!currentIdentity || getTrackSeconds(current) > 0) return;
-
-          setCatalog((previous) => {
-            const next = previous.map((song) => {
-              const matchKey = getCatalogIdentity(song);
-              return matchKey && matchKey === currentIdentity ? { ...song, duration: dur, seconds: dur } : song;
-            });
-            saveCachedCatalog(next);
-            return next;
-          });
+          syncCatalogDuration(current, dur);
         }}
         onEnded={() => advanceRef.current(true)}
         onError={() => {
