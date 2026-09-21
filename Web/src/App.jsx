@@ -1887,7 +1887,7 @@ export default function App() {
                     <CoverArt track={track} size="sm" />
                     <span>
                       <strong>{track.title}</strong>
-                      <small aria-label="Track duration unavailable" title="Track duration unavailable">—</small>
+                      <small aria-label="Track duration unavailable" title="Track duration unavailable"></small>
                     </span>
                   </button>
                 ))}
