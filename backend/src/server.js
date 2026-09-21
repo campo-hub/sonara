@@ -28,13 +28,17 @@ if (firebaseAdminConfigured && !admin.apps.length) {
 }
 
 async function requireAuth(req, res, next) {
-  if (!firebaseAdminConfigured) {
-    req.user = { uid: `anonymous-${req.ip || 'local'}-${Date.now()}` };
-    return next();
-  }
-
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+
+  if (!firebaseAdminConfigured) {
+    if (process.env.NODE_ENV === 'development' && !token) {
+      req.user = { uid: `anonymous-${req.ip || 'local'}-${Date.now()}` };
+      return next();
+    }
+    return res.status(401).json({ message: 'Sign in is required for this action.' });
+  }
+
   if (!token) return res.status(401).json({ message: 'Sign in is required for this action.' });
 
   try {
@@ -48,7 +52,8 @@ async function requireAuth(req, res, next) {
 const defaultOrigins = [
   'http://localhost:5173',
   'https://campo-hub.github.io',
-  'https://campo-hub.github.io/sonara'
+  'https://campo-hub.github.io/sonara',
+  'https://sonara-senm.onrender.com'
 ];
 
 const allowedOrigins = [...new Set([
