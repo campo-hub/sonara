@@ -66,18 +66,7 @@ const allowedOrigins = [...new Set([
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-
-    const normalizedOrigin = origin.replace(/\/+$/, '');
-    if (allowedOrigins.some((allowed) => allowed.replace(/\/+$/, '') === normalizedOrigin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error('CORS blocked for this origin'));
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
