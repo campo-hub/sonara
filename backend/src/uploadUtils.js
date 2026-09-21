@@ -34,6 +34,29 @@ export function isAudioFile(fileName = '') {
   ].some((ext) => name.endsWith(ext));
 }
 
+export function detectAudioMimeType(fileName = '', mimeType = '') {
+  const name = String(fileName || '').toLowerCase();
+  const normalizedMime = String(mimeType || '').toLowerCase();
+
+  if (name.endsWith('.mp3')) return 'audio/mpeg';
+  if (name.endsWith('.wav')) return 'audio/wav';
+  if (name.endsWith('.flac')) return 'audio/flac';
+  if (name.endsWith('.m4a') || name.endsWith('.mp4') || name.endsWith('.m4b') || name.endsWith('.m4r')) return 'audio/mp4';
+  if (name.endsWith('.aac')) return 'audio/aac';
+  if (name.endsWith('.ogg') || name.endsWith('.oga')) return 'audio/ogg';
+  if (name.endsWith('.opus')) return 'audio/opus';
+
+  if (normalizedMime.includes('mpeg')) return 'audio/mpeg';
+  if (normalizedMime.includes('wav')) return 'audio/wav';
+  if (normalizedMime.includes('flac')) return 'audio/flac';
+  if (normalizedMime.includes('mp4') || normalizedMime.includes('m4a')) return 'audio/mp4';
+  if (normalizedMime.includes('aac')) return 'audio/aac';
+  if (normalizedMime.includes('ogg')) return 'audio/ogg';
+  if (normalizedMime.includes('opus')) return 'audio/opus';
+
+  return normalizedMime || 'audio/mpeg';
+}
+
 export function isImageFile(fileName = '') {
   return ['.jpg', '.jpeg', '.png', '.webp'].some((ext) =>
     String(fileName).toLowerCase().endsWith(ext)

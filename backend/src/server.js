@@ -6,7 +6,7 @@ import multer from 'multer';
 import { MongoClient } from 'mongodb';
 import * as mm from 'music-metadata';
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
-import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
+import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, detectAudioMimeType, isAudioFile, isImageFile } from './uploadUtils.js';
 
 dotenv.config();
 
@@ -252,13 +252,30 @@ function buildCoverMap(files = []) {
   return coversByFolder;
 }
 
-async function getAudioDurationFromBuffer(buffer, mimeType = 'application/octet-stream') {
-  try {
-    const metadata = await mm.parseBuffer(buffer, mimeType, { skipCovers: true });
-    return Number(metadata?.format?.duration) || 0;
-  } catch {
-    return 0;
+async function getAudioDurationFromBuffer(buffer, mimeType = 'application/octet-stream', fileName = '') {
+  const candidates = [...new Set([
+    detectAudioMimeType(fileName, mimeType),
+    mimeType,
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/wav',
+    'audio/flac',
+    'audio/ogg',
+    'audio/opus',
+    'application/octet-stream'
+  ].filter(Boolean))];
+
+  for (const candidate of candidates) {
+    try {
+      const metadata = await mm.parseBuffer(buffer, candidate, { skipCovers: true });
+      const duration = Number(metadata?.format?.duration) || 0;
+      if (duration > 0) return duration;
+    } catch {
+      // Try the next candidate if the mime type is not recognized for this file.
+    }
   }
+
+  return 0;
 }
 
 async function getAudioDurationFromObjectKey(objectKey) {
@@ -275,7 +292,7 @@ async function getAudioDurationFromObjectKey(objectKey) {
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks.map((chunk) => Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    return getAudioDurationFromBuffer(buffer, 'audio/mpeg');
+    return getAudioDurationFromBuffer(buffer, 'application/octet-stream', objectKey);
   } catch {
     return 0;
   }
@@ -444,7 +461,11 @@ app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
     const parsedTracks = await Promise.all(audioFiles.map(async (file, index) => {
       const objectKey = resolveUploadPath(file, 'uploads');
       const uploadResult = await uploadToR2(file, objectKey);
-      const duration = await getAudioDurationFromBuffer(file.buffer, file.mimetype || 'application/octet-stream');
+      const duration = await getAudioDurationFromBuffer(
+        file.buffer,
+        file.mimetype || 'application/octet-stream',
+        file.originalname || file.webkitRelativePath || file.fieldname || objectKey
+      );
       return buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url, duration);
     }));
 

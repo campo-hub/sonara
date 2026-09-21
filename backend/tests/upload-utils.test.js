@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from '../src/uploadUtils.js';
+import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, detectAudioMimeType, isAudioFile, isImageFile } from '../src/uploadUtils.js';
 
 test('buildObjectKey preserves folder structure and slugifies names', () => {
   assert.equal(buildObjectKey('album/artist/track.mp3'), 'uploads/album/artist/track.mp3');
@@ -25,6 +25,12 @@ test('buildFallbackCatalog returns valid catalog entries with metadata', () => {
 
 test('audio and image type helpers recognize Sonara supported formats', () => {
   assert.equal(isAudioFile('song.mp3'), true);
+  assert.equal(isAudioFile('song.m4a'), true);
   assert.equal(isAudioFile('cover.jpg'), false);
   assert.equal(isImageFile('cover.jpg'), true);
+});
+
+test('M4A files resolve to the correct mime type for metadata parsing', () => {
+  assert.equal(detectAudioMimeType('song.m4a'), 'audio/mp4');
+  assert.equal(detectAudioMimeType('song.mp3'), 'audio/mpeg');
 });
