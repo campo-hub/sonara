@@ -241,10 +241,16 @@ const resolveAssetUrl = (value) => {
   }
 };
 
+const getCatalogIdentity = (item) => {
+  const raw = item?.id ?? item?._id ?? item?.songId ?? item?.audioUrl ?? item?.src ?? item?.url ?? item?.fileUrl ?? item?.key ?? item?.fileKey ?? '';
+  return String(raw || '').trim();
+};
+
 const normalizeTrack = (item, index = 0) => {
   const seconds = parseTime(item?.duration ?? item?.seconds ?? item?.length ?? item?.runtime ?? 0);
+  const rawIdentity = getCatalogIdentity(item);
   return {
-    id: String(item?.id ?? item?._id ?? `catalog-${index}`),
+    id: rawIdentity || `catalog-${index}`,
     title: item?.title || 'Untitled track',
     artist: item?.artist || 'Unknown artist',
     album: item?.album || 'Singles',
@@ -2348,12 +2354,15 @@ export default function App() {
           const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
           setAudioDuration(dur);
 
-          if (!current || dur <= 0 || getTrackSeconds(current) > 0) return;
+          if (!current || dur <= 0) return;
+
+          const currentIdentity = getCatalogIdentity(current);
+          if (!currentIdentity || getTrackSeconds(current) > 0) return;
 
           setCatalog((previous) => {
             const next = previous.map((song) => {
-              const songId = String(song?.id ?? song?._id ?? '');
-              return songId === String(current.id) ? { ...song, duration: dur, seconds: dur } : song;
+              const matchKey = getCatalogIdentity(song);
+              return matchKey && matchKey === currentIdentity ? { ...song, duration: dur, seconds: dur } : song;
             });
             saveCachedCatalog(next);
             return next;
