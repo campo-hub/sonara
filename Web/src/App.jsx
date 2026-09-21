@@ -2344,7 +2344,21 @@ export default function App() {
         ref={audioRef}
         preload="metadata"
         onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-        onLoadedMetadata={(event) => setAudioDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onLoadedMetadata={(event) => {
+          const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
+          setAudioDuration(dur);
+
+          if (!current || dur <= 0 || getTrackSeconds(current) > 0) return;
+
+          setCatalog((previous) => {
+            const next = previous.map((song) => {
+              const songId = String(song?.id ?? song?._id ?? '');
+              return songId === String(current.id) ? { ...song, duration: dur, seconds: dur } : song;
+            });
+            saveCachedCatalog(next);
+            return next;
+          });
+        }}
         onEnded={() => advanceRef.current(true)}
         onError={() => {
           if (current?.src) {
