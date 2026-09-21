@@ -9,7 +9,7 @@ const apiBase = (() => {
   const configured = import.meta.env.VITE_API_URL;
   const isLocalDev = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   if (isLocalDev) return 'http://localhost:4000/api';
-  return configured || 'http://localhost:4000/api';
+  return configured || 'https://sonara-backend.onrender.com/api';
 })();
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_CACHE_KEY = 'sonara.web.catalog.v1';
