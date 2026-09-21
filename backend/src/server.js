@@ -84,6 +84,24 @@ app.options('*', cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 
+app.get('/', (_, res) => {
+  res.json({
+    status: 'ok',
+    service: 'sonara-backend',
+    message: 'Sonara backend API is running.',
+    endpoints: ['/api/health', '/api/catalog', '/api/featured']
+  });
+});
+
+app.get('/api', (_, res) => {
+  res.json({
+    status: 'ok',
+    service: 'sonara-backend',
+    message: 'Sonara backend API is running.',
+    endpoints: ['/api/health', '/api/catalog', '/api/featured', '/api/me/library']
+  });
+});
+
 const catalog = [];
 const uploadedTracks = [];
 
