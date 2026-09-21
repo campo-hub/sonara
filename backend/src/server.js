@@ -440,6 +440,16 @@ app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
   }
 });
 
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Sonara backend running on http://0.0.0.0:${port}`);
+});
+
+server.on('error', (error) => {
+  if (error && error.code === 'EADDRINUSE') {
+    console.error(`Port ${port} is already in use. Stop the existing Sonara backend or choose a different PORT value.`);
+    process.exit(1);
+  }
+
+  console.error('Server failed to start:', error);
+  process.exit(1);
 });

@@ -5,10 +5,16 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const apiBase = (() => {
+  const configured = import.meta.env.VITE_API_URL;
+  const isLocalDev = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  if (isLocalDev) return 'http://localhost:4000/api';
+  return configured || 'http://localhost:4000/api';
+})();
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_CACHE_KEY = 'sonara.web.catalog.v1';
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
+const CATALOG_FETCH_TIMEOUT_MS = 2500;
 
 const fallbackCatalog = [];
 const PLACEHOLDER_CATALOG_TITLES = new Set([
@@ -1254,8 +1260,11 @@ export default function App() {
     saveCachedCatalog(safeCached);
     setServerOnline(false);
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), CATALOG_FETCH_TIMEOUT_MS);
+
     try {
-      const response = await fetch(`${apiBase}/catalog`);
+      const response = await fetch(`${apiBase}/catalog`, { signal: controller.signal });
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const payload = await response.json();
       const songs = sanitizeCatalog(Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : []);
@@ -1270,11 +1279,21 @@ export default function App() {
       saveCachedCatalog(songs);
       setServerOnline(true);
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        const activeCatalog = sanitizeCatalog(getDefaultCatalog());
+        setCatalog(activeCatalog);
+        saveCachedCatalog(activeCatalog);
+        setServerOnline(false);
+        return;
+      }
+
       console.error('Unable to load catalog', error);
       const activeCatalog = sanitizeCatalog(getDefaultCatalog());
       setCatalog(activeCatalog);
       saveCachedCatalog(activeCatalog);
       setServerOnline(false);
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }, []);
 
