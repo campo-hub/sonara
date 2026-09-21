@@ -18,22 +18,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 2500;
 
 const fallbackCatalog = [];
 const PLACEHOLDER_CATALOG_TITLES = new Set([
-  'night drive',
-  'dream state',
-  'sunset loop',
-  'hollow glow',
-  'velvet run',
-  'lunar kite',
   'sonara # set the tone for the next hour'
 ]);
 
 const PLACEHOLDER_CATALOG_ARTISTS = new Set([
-  'sonara studio',
-  'north echo',
-  'glass harbor',
-  'daybreak ritual',
-  'cinder avenue',
-  'harbor echo'
+  'sonara studio'
 ]);
 
 const isPlaceholderCatalogEntry = (song) => {
@@ -42,6 +31,9 @@ const isPlaceholderCatalogEntry = (song) => {
   const artist = String(song?.artist ?? '').trim().toLowerCase();
   const source = `${id} ${title} ${artist} ${song?.album ?? ''} ${song?.description ?? ''}`.toLowerCase();
 
+  if (song?.source === 'fallback' || song?.source === 'bucket' || song?.source === 'upload') {
+    return false;
+  }
   if (id.startsWith('seed-')) return true;
   if (PLACEHOLDER_CATALOG_TITLES.has(title)) return true;
   if (PLACEHOLDER_CATALOG_ARTISTS.has(artist)) return true;
