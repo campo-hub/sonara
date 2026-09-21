@@ -153,6 +153,11 @@ const parseTime = (value) => {
   return parts.reduce((total, part) => total * 60 + part, 0);
 };
 
+const getTrackSeconds = (track) => {
+  const raw = Number(track?.seconds ?? track?.duration ?? track?.length ?? track?.runtime ?? 0);
+  return Number.isFinite(raw) ? raw : 0;
+};
+
 const formatBytes = (bytes) => {
   if (!bytes) return '0 KB';
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -180,7 +185,8 @@ const queueFraction = (queue) => {
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 const totalRuntime = (tracks) => {
-  const minutes = Math.round(tracks.reduce((sum, track) => sum + track.seconds, 0) / 60);
+  const totalSeconds = tracks.reduce((sum, track) => sum + getTrackSeconds(track), 0);
+  const minutes = Math.round(totalSeconds / 60);
   return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min`;
 };
 
@@ -236,13 +242,14 @@ const resolveAssetUrl = (value) => {
 };
 
 const normalizeTrack = (item, index = 0) => {
-  const seconds = parseTime(item?.duration ?? item?.seconds);
+  const seconds = parseTime(item?.duration ?? item?.seconds ?? item?.length ?? item?.runtime ?? 0);
   return {
     id: String(item?.id ?? item?._id ?? `catalog-${index}`),
     title: item?.title || 'Untitled track',
     artist: item?.artist || 'Unknown artist',
     album: item?.album || 'Singles',
     seconds,
+    duration: seconds,
     cover: resolveAssetUrl(item?.cover || item?.artwork || item?.coverUrl),
     src: resolveAssetUrl(item?.audioUrl || item?.streamUrl || item?.url || item?.src || item?.fileUrl),
     addedAt: Date.parse(item?.createdAt || item?.uploadedAt || '') || Date.now() - index * 1000
@@ -891,7 +898,7 @@ function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLik
               <i className="tl-dots" />
               {showWaveform && <Waveform seed={hashString(track.id)} active={isCurrent} />}
             </span>
-            <span className="tl-time">{formatTime(track.seconds)}</span>
+            <span className="tl-time">{formatTime(getTrackSeconds(track))}</span>
             <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
               <Icon name="heart" size={19} filled={isLiked} />
             </button>
@@ -1067,7 +1074,7 @@ function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, 
                         <strong>{item.title}</strong>
                         <small>{item.artist}</small>
                       </span>
-                      <em>{formatTime(item.seconds)}</em>
+                      <em>{formatTime(getTrackSeconds(item))}</em>
                     </button>
                   </li>
                 ))}
@@ -1222,7 +1229,13 @@ export default function App() {
   }, [authUser, libraryHydrated, prefs, userPlaylists]);
 
   const current = queue[pos] || null;
-  const total = audioDuration || current?.seconds || 0;
+  const total = Number.isFinite(audioDuration) && audioDuration > 0
+    ? audioDuration
+    : Number.isFinite(current?.seconds) && current.seconds > 0
+      ? current.seconds
+      : Number.isFinite(current?.duration) && current.duration > 0
+        ? current.duration
+        : 0;
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
 
@@ -1322,7 +1335,7 @@ export default function App() {
       name: (a, b) => a.title.localeCompare(b.title, undefined, compare),
       artist: (a, b) => a.artist.localeCompare(b.artist, undefined, compare) || a.title.localeCompare(b.title, undefined, compare),
       added: (a, b) => b.addedAt - a.addedAt,
-      duration: (a, b) => b.seconds - a.seconds
+      duration: (a, b) => getTrackSeconds(b) - getTrackSeconds(a)
     };
     return list.sort(sorters[sortKey]);
   }, [allTracks, query, sortKey]);
@@ -1843,7 +1856,7 @@ export default function App() {
                     <CoverArt track={track} size="sm" />
                     <span>
                       <strong>{track.title}</strong>
-                      <small>{formatTime(track.seconds)}</small>
+                      <small>{formatTime(getTrackSeconds(track))}</small>
                     </span>
                   </button>
                 ))}
