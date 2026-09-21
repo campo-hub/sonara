@@ -904,7 +904,7 @@ function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLik
               <i className="tl-dots" />
               {showWaveform && <Waveform seed={hashString(track.id)} active={isCurrent} />}
             </span>
-            <span className="tl-time" aria-label="Track duration unavailable" title="Track duration unavailable">—</span>
+            <span className="tl-time" aria-label="Track duration unavailable" title="Track duration unavailable"></span>
             <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
               <Icon name="heart" size={19} filled={isLiked} />
             </button>
@@ -1080,7 +1080,7 @@ function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, 
                         <strong>{item.title}</strong>
                         <small>{item.artist}</small>
                       </span>
-                      <em aria-label="Track duration unavailable" title="Track duration unavailable">—</em>
+                      <em aria-label="Track duration unavailable" title="Track duration unavailable"></em>
                     </button>
                   </li>
                 ))}
