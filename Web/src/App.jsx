@@ -71,6 +71,14 @@ const saveCachedCatalog = (songs) => {
   }
 };
 
+const clearCatalogCache = () => {
+  try {
+    window.localStorage.removeItem(CATALOG_CACHE_KEY);
+  } catch {
+    // storage is unavailable, ignore gracefully
+  }
+};
+
 const getUserDisplayName = (user) => {
   if (!user) return 'Listener';
   if (user.displayName) return user.displayName.trim();
@@ -1286,10 +1294,8 @@ export default function App() {
   /* ------------------------------ data ------------------------------ */
 
   const fetchCatalog = useCallback(async () => {
-    const cachedCatalog = getDefaultCatalog();
-    const safeCached = sanitizeCatalog(cachedCatalog);
-    setCatalog(safeCached);
-    saveCachedCatalog(safeCached);
+    clearCatalogCache();
+    setCatalog([]);
     setServerOnline(false);
 
     const controller = new AbortController();
@@ -1300,29 +1306,18 @@ export default function App() {
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const payload = await response.json();
       const songs = sanitizeCatalog(Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : []);
-      if (!songs.length) {
-        setCatalog(safeCached);
-        saveCachedCatalog(safeCached);
-        setServerOnline(false);
-        return;
-      }
-
       setCatalog(songs);
       saveCachedCatalog(songs);
-      setServerOnline(true);
+      setServerOnline(Boolean(songs.length));
     } catch (error) {
       if (error?.name === 'AbortError') {
-        const activeCatalog = sanitizeCatalog(getDefaultCatalog());
-        setCatalog(activeCatalog);
-        saveCachedCatalog(activeCatalog);
+        setCatalog([]);
         setServerOnline(false);
         return;
       }
 
       console.error('Unable to load catalog', error);
-      const activeCatalog = sanitizeCatalog(getDefaultCatalog());
-      setCatalog(activeCatalog);
-      saveCachedCatalog(activeCatalog);
+      setCatalog([]);
       setServerOnline(false);
     } finally {
       window.clearTimeout(timeoutId);
