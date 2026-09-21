@@ -10,30 +10,60 @@ const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_CACHE_KEY = 'sonara.web.catalog.v1';
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
 
-const fallbackCatalog = [
-  { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
-  { id: 'seed-dream-state', title: 'Dream State', artist: 'North Echo', album: 'Late Bloom', seconds: 201, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', addedAt: Date.now() - 2000 },
-  { id: 'seed-sunset-loop', title: 'Sunset Loop', artist: 'Glass Harbor', album: 'Warm Static', seconds: 246, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', addedAt: Date.now() - 3000 },
-  { id: 'seed-hollow-glow', title: 'Hollow Glow', artist: 'Daybreak Ritual', album: 'Low Tide', seconds: 218, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', addedAt: Date.now() - 4000 },
-  { id: 'seed-velvet-run', title: 'Velvet Run', artist: 'Cinder Avenue', album: 'Night Circuit', seconds: 247, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', addedAt: Date.now() - 5000 },
-  { id: 'seed-lunar-kite', title: 'Lunar Kite', artist: 'Harbor Echo', album: 'Cassette Air', seconds: 261, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', addedAt: Date.now() - 6000 }
-];
+const fallbackCatalog = [];
+const PLACEHOLDER_CATALOG_TITLES = new Set([
+  'night drive',
+  'dream state',
+  'sunset loop',
+  'hollow glow',
+  'velvet run',
+  'lunar kite',
+  'sonara # set the tone for the next hour'
+]);
+
+const PLACEHOLDER_CATALOG_ARTISTS = new Set([
+  'sonara studio',
+  'north echo',
+  'glass harbor',
+  'daybreak ritual',
+  'cinder avenue',
+  'harbor echo'
+]);
+
+const isPlaceholderCatalogEntry = (song) => {
+  const id = String(song?.id ?? song?._id ?? '').trim().toLowerCase();
+  const title = String(song?.title ?? '').trim().toLowerCase();
+  const artist = String(song?.artist ?? '').trim().toLowerCase();
+  const source = `${id} ${title} ${artist} ${song?.album ?? ''} ${song?.description ?? ''}`.toLowerCase();
+
+  if (id.startsWith('seed-')) return true;
+  if (PLACEHOLDER_CATALOG_TITLES.has(title)) return true;
+  if (PLACEHOLDER_CATALOG_ARTISTS.has(artist)) return true;
+  if (source.includes('sonara #') || source.includes('set the tone for the next hour')) return true;
+  return false;
+};
+
+const sanitizeCatalog = (songs) => {
+  if (!Array.isArray(songs)) return [];
+  return songs.filter((song) => !isPlaceholderCatalogEntry(song));
+};
 
 const getCachedCatalog = () => {
   try {
     const raw = window.localStorage.getItem(CATALOG_CACHE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const sanitized = sanitizeCatalog(parsed);
+    if (sanitized.length !== (Array.isArray(parsed) ? parsed.length : 0)) {
+      window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(sanitized));
+    }
+    return sanitized;
   } catch {
     return [];
   }
 };
 
-const getDefaultCatalog = () => {
-  const cached = getCachedCatalog();
-  return cached.length ? cached : fallbackCatalog;
-};
+const getDefaultCatalog = () => getCachedCatalog();
 
 const saveCachedCatalog = (songs) => {
   try {
@@ -485,6 +515,13 @@ const ICONS = {
       <path d="m3 21 7-7" />
     </>
   ),
+  logout: (
+    <>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </>
+  ),
   reset: (
     <>
       <path d="M3 12a9 9 0 1 0 3-6.7" />
@@ -615,7 +652,9 @@ function CoverArt({ track, size = 'md', round = false }) {
 function Record({ track, playing = false, spin = true }) {
   return (
     <span className={`record ${playing && spin ? 'is-spinning' : ''}`} aria-hidden="true">
-      <span className="record-label">{track ? <CoverArt track={track} size="fill" round /> : null}</span>
+      <span className="record-disc">
+        <span className="record-label">{track ? <CoverArt track={track} size="fill" round /> : null}</span>
+      </span>
     </span>
   );
 }
@@ -697,6 +736,39 @@ function EmptyState({ icon = 'music', title, text, action }) {
       <p>{text}</p>
       {action}
     </div>
+  );
+}
+
+/* Each page gets its own pigment banner, so color comes from the room and not from big type. */
+const BANNER_STYLES = {
+  library: { bg: '#2F4B6E', fg: '#F1E9D6', palette: 0, pattern: 1 },
+  'all-music': { bg: '#D9A441', fg: '#16150F', palette: 1, pattern: 0 },
+  playlists: { bg: '#5E7B4F', fg: '#F1E9D6', palette: 2, pattern: 3 },
+  favorites: { bg: '#B4533C', fg: '#F6E9DA', palette: 3, pattern: 4 },
+  upload: { bg: '#26251F', fg: '#F1E9D6', palette: 5, pattern: 2 },
+  lab: { bg: '#E0D8C3', fg: '#16150F', palette: 4, pattern: 5 }
+};
+
+/* The now-spinning card borrows a pigment from the record on the deck. */
+const tintFor = (track) => {
+  if (!track || track.cover) return { bg: 'var(--deck-bg)', fg: 'var(--deck-fg)' };
+  const index = ((hashString(track.id || track.title || 'sonara') >>> 3) + 2) % SLEEVE_PALETTES.length;
+  const base = SLEEVE_PALETTES[index][0];
+  return { bg: base, fg: readableOn(base) === '#0e0e0e' ? '#16150F' : '#F6EFE0' };
+};
+
+function PageBanner({ id, title, subtitle }) {
+  const style = BANNER_STYLES[id] || BANNER_STYLES.library;
+  return (
+    <header className="banner" style={{ '--tone-bg': style.bg, '--tone-fg': style.fg }}>
+      <div className="banner-copy">
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      <svg className="banner-art" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <SleeveShapes pattern={style.pattern} colors={SLEEVE_PALETTES[style.palette]} />
+      </svg>
+    </header>
   );
 }
 
@@ -1176,19 +1248,20 @@ export default function App() {
   /* ------------------------------ data ------------------------------ */
 
   const fetchCatalog = useCallback(async () => {
-    const seededCatalog = getDefaultCatalog();
-    setCatalog(seededCatalog);
-    saveCachedCatalog(seededCatalog);
+    const cachedCatalog = getDefaultCatalog();
+    const safeCached = sanitizeCatalog(cachedCatalog);
+    setCatalog(safeCached);
+    saveCachedCatalog(safeCached);
     setServerOnline(false);
 
     try {
       const response = await fetch(`${apiBase}/catalog`);
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const payload = await response.json();
-      const songs = Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : [];
+      const songs = sanitizeCatalog(Array.isArray(payload?.songs) ? payload.songs : Array.isArray(payload) ? payload : []);
       if (!songs.length) {
-        setCatalog(seededCatalog);
-        saveCachedCatalog(seededCatalog);
+        setCatalog(safeCached);
+        saveCachedCatalog(safeCached);
         setServerOnline(false);
         return;
       }
@@ -1198,7 +1271,7 @@ export default function App() {
       setServerOnline(true);
     } catch (error) {
       console.error('Unable to load catalog', error);
-      const activeCatalog = getDefaultCatalog();
+      const activeCatalog = sanitizeCatalog(getDefaultCatalog());
       setCatalog(activeCatalog);
       saveCachedCatalog(activeCatalog);
       setServerOnline(false);
@@ -1574,10 +1647,17 @@ export default function App() {
         try {
           const formData = new FormData();
           group.forEach((file) => formData.append('files', file, file.webkitRelativePath || file.name));
+          let token;
+          try {
+            token = await getCurrentIdToken();
+          } catch {
+            token = undefined;
+          }
           const data = await sendUpload(
             formData,
             (fraction) => setUploadQueue((previous) => (previous ? { ...previous, batchProgress: fraction } : previous)),
-            run
+            run,
+            token
           );
           const uploaded = (Array.isArray(data?.tracks) ? data.tracks : []).map(normalizeTrack);
           if (uploaded.length) setSessionUploads((previous) => [...uploaded, ...previous].slice(0, 50));
@@ -1687,55 +1767,68 @@ export default function App() {
         open: () => openPlaylist(playlist.id)
       }))
     ];
+
     const spotlightTrack = current || recentTracks[0] || favoriteTracks[0] || allTracks[0];
+    const spotlightPlaying = Boolean(spotlightTrack && isPlaying && current?.id === spotlightTrack.id);
+    const tint = tintFor(spotlightTrack);
+    const playSpotlight = () => {
+      if (!spotlightTrack) return;
+      if (current && current.id === spotlightTrack.id) {
+        togglePlay();
+        return;
+      }
+      const index = allTracks.findIndex((item) => item.id === spotlightTrack.id);
+      if (index >= 0) startPlayback(allTracks, index, 'All Music');
+    };
+    const playRecent = (track) => playFromList(allTracks, allTracks.findIndex((item) => item.id === track.id), 'Recently played');
+    const recentLead = recentTracks[0] || allTracks[0];
+    const recentList = recentTracks.slice(0, 4).length ? recentTracks.slice(0, 4) : allTracks.slice(0, 4);
 
     return (
       <>
         <section className="hero">
-          <div className="hero-copy hero-copy-featured">
+          <div className="hero-head">
             <p className="greeting">
               <i className="live-dot" aria-hidden="true" />
               {greeting()}, {getUserDisplayName(authUser)}
             </p>
-            <div className="hero-intro">
-              <span className="hero-kicker">Sonara</span>
-              <h1>Set the tone for the next hour.</h1>
-            </div>
-            <div className="feature-panel">
+          </div>
+
+          <div className="hero-grid">
+            <div className="feature-panel" style={{ '--tint': tint.bg, '--tint-fg': tint.fg }}>
               <div className="feature-art">
                 <SleeveStack track={spotlightTrack} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
               </div>
-              {spotlightTrack && (
-                <div className="feature-meta">
-                  <span className="feature-kicker">Now spinning</span>
-                  <strong>{spotlightTrack.title}</strong>
-                  <small>{spotlightTrack.artist}</small>
+              <div className="feature-side">
+                {spotlightTrack && (
+                  <div className="feature-meta">
+                    <span className="feature-kicker">{spotlightPlaying ? 'Now spinning' : 'Ready on the deck'}</span>
+                    <strong>{spotlightTrack.title}</strong>
+                    <small>{spotlightTrack.artist}</small>
+                  </div>
+                )}
+                <div className="feature-actions">
+                  <button type="button" className="feature-play" onClick={playSpotlight} aria-label={spotlightPlaying ? 'Pause' : 'Play'} disabled={!spotlightTrack}>
+                    <Icon name={spotlightPlaying ? 'pause' : 'play'} size={20} />
+                  </button>
+                  <DjButton active={djOn} onClick={toggleDj} className="feature-dj" />
                 </div>
-              )}
-              <DjButton active={djOn} onClick={toggleDj} className="feature-dj" />
+              </div>
             </div>
-          </div>
 
-          <div className="hero-visual hero-visual-featured">
             <div className="mini-feature-card">
               <div className="mini-feature-header">
                 <span>Recently played</span>
                 <button type="button" className="text-btn" onClick={() => goTo('all-music')}>View all</button>
               </div>
-              <div className="mini-feature-highlight">
-                {(recentTracks[0] || allTracks[0]) && (
-                  <button type="button" className="mini-feature-spotlight" onClick={() => {
-                    const firstTrack = recentTracks[0] || allTracks[0];
-                    if (!firstTrack) return;
-                    playFromList(allTracks, allTracks.findIndex((item) => item.id === firstTrack.id), 'Recently played');
-                  }}>
-                    <CoverArt track={recentTracks[0] || allTracks[0]} size="lg" />
-                  </button>
-                )}
-              </div>
+              {recentLead && (
+                <button type="button" className="mini-feature-spotlight" onClick={() => playRecent(recentLead)} aria-label={`Play ${recentLead.title}`}>
+                  <CoverArt track={recentLead} size="lg" />
+                </button>
+              )}
               <div className="mini-feature-grid">
-                {(recentTracks.slice(0, 4).length ? recentTracks.slice(0, 4) : allTracks.slice(0, 4)).map((track) => (
-                  <button key={track.id} type="button" className="mini-feature-tile" onClick={() => playFromList(allTracks, allTracks.findIndex((item) => item.id === track.id), 'Recently played')}>
+                {recentList.map((track) => (
+                  <button key={track.id} type="button" className="mini-feature-tile" onClick={() => playRecent(track)}>
                     <CoverArt track={track} size="sm" />
                     <span>
                       <strong>{track.title}</strong>
@@ -2219,6 +2312,7 @@ export default function App() {
   };
 
   const subtitle = view === 'all-music' ? (query ? `${plural(visibleTracks.length, 'result')} for “${query}”` : plural(allTracks.length, 'track')) : pageMeta[view]?.subtitle;
+  const displayName = getUserDisplayName(authUser);
 
   return (
     <div className={`app-shell ${prefs.compact ? 'is-compact' : ''}`}>
@@ -2269,17 +2363,19 @@ export default function App() {
             </button>
           )}
           {authUser ? (
-            <div className="user-shell">
-              <div className="user-pill">
-                <button type="button" className="user-badge" onClick={() => goTo('home')} aria-label="Signed in as user">
-                  <span className="user-avatar" aria-hidden="true"><Icon name="user" size={14} /></span>
-                  {getUserDisplayName(authUser)}
-                </button>
-              </div>
-              <button type="button" className="user-signout" onClick={handleSignOut}>Sign out</button>
+            <div className="user-area">
+              <button type="button" className="user-chip" onClick={() => goTo('home')} aria-label={`Signed in as ${displayName}`}>
+                <span className="user-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+                <span className="user-name">{displayName}</span>
+              </button>
+              <i className="user-sep" aria-hidden="true" />
+              <button type="button" className="signout-btn" onClick={handleSignOut} aria-label="Sign out">
+                <Icon name="logout" size={17} />
+                <span>Sign out</span>
+              </button>
             </div>
           ) : (
-            <button type="button" className="btn btn-primary" onClick={() => { setAuthReason('Sign in to unlock your library and sync favorites.'); setAuthOpen(true); }}>
+            <button type="button" className="btn btn-primary btn-signin" onClick={() => { setAuthReason('Sign in to unlock your library and sync favorites.'); setAuthOpen(true); }}>
               Sign in
             </button>
           )}
@@ -2295,10 +2391,7 @@ export default function App() {
           renderHome()
         ) : (
           <>
-            <header className="page-head">
-              <h1>{pageMeta[view]?.title}</h1>
-              {subtitle && <p>{subtitle}</p>}
-            </header>
+            <PageBanner id={view} title={pageMeta[view]?.title} subtitle={subtitle} />
             {pageContent[view]?.()}
           </>
         )}
