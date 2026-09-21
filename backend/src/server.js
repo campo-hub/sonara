@@ -6,7 +6,7 @@ import multer from 'multer';
 import { MongoClient } from 'mongodb';
 import * as mm from 'music-metadata';
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
-import { buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
+import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, isAudioFile, isImageFile } from './uploadUtils.js';
 
 dotenv.config();
 
@@ -320,7 +320,7 @@ function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
 
 async function loadCatalogFromBucket() {
   if (!r2Client || !r2BucketName) {
-    return [];
+    return buildFallbackCatalog();
   }
 
   try {
@@ -334,6 +334,10 @@ async function loadCatalogFromBucket() {
     const imageKeys = keys.filter((key) => isImageFile(key));
     const audioItems = keys.filter((key) => isAudioFile(key));
 
+    if (!audioItems.length) {
+      return buildFallbackCatalog();
+    }
+
     return Promise.all(audioItems.map(async (key) => {
       const folder = getParentFolder(key);
       const coverKey = imageKeys.find((candidate) => {
@@ -344,7 +348,7 @@ async function loadCatalogFromBucket() {
     }));
   } catch (error) {
     console.error('Unable to list Cloudflare R2 catalog:', error);
-    return [];
+    return buildFallbackCatalog();
   }
 }
 
