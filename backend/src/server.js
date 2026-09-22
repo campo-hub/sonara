@@ -339,7 +339,7 @@ function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
 
 async function loadCatalogFromBucket() {
   if (!r2Client || !r2BucketName) {
-    return buildFallbackCatalog();
+    return [];
   }
 
   const prefixes = ['uploads/', 'music/', 'audio/', ''];
@@ -369,8 +369,8 @@ async function loadCatalogFromBucket() {
     }
   }
 
-  console.warn(`Cloudflare R2 bucket "${r2BucketName}" did not contain audio files under any known prefixes. Falling back to sample catalog.`);
-  return buildFallbackCatalog();
+  console.warn(`Cloudflare R2 bucket "${r2BucketName}" did not contain audio files under the known prefixes; returning an empty catalog instead of sample data.`);
+  return [];
 }
 
 function mergeCatalog(bucketTracks = []) {
