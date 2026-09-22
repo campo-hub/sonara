@@ -342,33 +342,35 @@ async function loadCatalogFromBucket() {
     return buildFallbackCatalog();
   }
 
-  try {
-    const response = await r2Client.send(new ListObjectsV2Command({
-      Bucket: r2BucketName,
-      Prefix: 'uploads/'
-    }));
+  const prefixes = ['uploads/', 'music/', 'audio/', ''];
 
-    const objects = Array.isArray(response.Contents) ? response.Contents : [];
-    const keys = objects.map((item) => item.Key).filter(Boolean);
-    const imageKeys = keys.filter((key) => isImageFile(key));
-    const audioItems = keys.filter((key) => isAudioFile(key));
+  for (const prefix of prefixes) {
+    try {
+      const response = await r2Client.send(new ListObjectsV2Command({
+        Bucket: r2BucketName,
+        Prefix: prefix
+      }));
 
-    if (!audioItems.length) {
-      return buildFallbackCatalog();
+      const objects = Array.isArray(response.Contents) ? response.Contents : [];
+      const keys = objects.map((item) => item.Key).filter(Boolean);
+      const imageKeys = keys.filter((key) => isImageFile(key));
+      const audioItems = keys.filter((key) => isAudioFile(key));
+
+      if (audioItems.length) {
+        return Promise.all(audioItems.map(async (key) => {
+          const folder = getParentFolder(key);
+          const coverKey = imageKeys.find((candidate) => getParentFolder(candidate) === folder) || '';
+          const duration = await getAudioDurationFromObjectKey(key);
+          return buildBucketTrackFromKey(key, coverKey, duration);
+        }));
+      }
+    } catch (error) {
+      console.error(`Unable to list Cloudflare R2 catalog for prefix "${prefix}":`, error);
     }
-
-    return Promise.all(audioItems.map(async (key) => {
-      const folder = getParentFolder(key);
-      const coverKey = imageKeys.find((candidate) => {
-        return getParentFolder(candidate) === folder;
-      }) || '';
-      const duration = await getAudioDurationFromObjectKey(key);
-      return buildBucketTrackFromKey(key, coverKey, duration);
-    }));
-  } catch (error) {
-    console.error('Unable to list Cloudflare R2 catalog:', error);
-    return buildFallbackCatalog();
   }
+
+  console.warn(`Cloudflare R2 bucket "${r2BucketName}" did not contain audio files under any known prefixes. Falling back to sample catalog.`);
+  return buildFallbackCatalog();
 }
 
 function mergeCatalog(bucketTracks = []) {

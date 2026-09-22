@@ -66,11 +66,18 @@ const describeConfigProblem = () => {
   return '';
 };
 
+const isAbortError = (error) => {
+  if (!error) return false;
+  if (error.name === 'AbortError') return true;
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('aborted') || message.includes('signal is aborted');
+};
+
 const explainCatalogError = (error) => {
   if (error?.status === 404) return `The server answered 404, so ${apiBase}/catalog is not a route it knows. Check the URL and that /api is included.`;
   if (error?.status >= 500) return `The server answered ${error.status}. It may still be starting up, or it crashed. Check the Render logs.`;
   if (error?.status) return `The server answered ${error.status}.`;
-  if (error?.name === 'AbortError') return 'The server took too long to answer. Render free plans can need up to a minute to wake up.';
+  if (isAbortError(error)) return 'The server took too long to answer. Render free plans can need up to a minute to wake up.';
   return `The browser could not reach ${apiBase}/catalog. Check VITE_API_URL, and that the server allows this site in its CORS settings.`;
 };
 
@@ -1312,6 +1319,13 @@ export default function App() {
         return;
       } catch (error) {
         lastError = error;
+        if (isAbortError(error)) {
+          if (!silent && attempt === 0 && isCurrent()) {
+            setCatalog((existing) => (existing.length ? existing : cached.length ? cached : []));
+            setCatalogStatus({ state: 'loading', message: 'The server is not answering yet. Retrying…' });
+          }
+          continue;
+        }
         if (error?.status && error.status < 500 && error.status !== 408 && error.status !== 429) break;
         if (!silent && attempt === 0 && isCurrent()) {
           setCatalog((existing) => (existing.length ? existing : cached.length ? cached : []));
@@ -1321,9 +1335,13 @@ export default function App() {
     }
 
     if (!isCurrent()) return;
-    console.error('Unable to load catalog', lastError);
+    if (!isAbortError(lastError)) {
+      console.error('Unable to load catalog', lastError);
+    }
     setServerOnline(false);
-    const reason = lastError?.status ? explainCatalogError(lastError) : describeConfigProblem() || explainCatalogError(lastError);
+    const reason = isAbortError(lastError)
+      ? explainCatalogError(lastError)
+      : lastError?.status ? explainCatalogError(lastError) : describeConfigProblem() || explainCatalogError(lastError);
     setCatalog((existing) => (existing.length && !isSampleCatalog(existing) ? existing : cached.length ? cached : []));
     setCatalogStatus({ state: cached.length ? 'cached' : 'loading', message: reason });
   }, []);
