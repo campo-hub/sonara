@@ -53,7 +53,7 @@ const defaultOrigins = [
   'http://localhost:5173',
   'https://campo-hub.github.io',
   'https://campo-hub.github.io/sonara',
-  'https://sonara-senm.onrender.com'
+  'https://sonara-xgmr.onrender.com'
 ];
 
 const allowedOrigins = [...new Set([

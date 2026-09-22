@@ -5,7 +5,7 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const apiBase = import.meta.env.VITE_API_URL || 'https://sonara-xgmr.onrender.com/api';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_CACHE_KEY = 'sonara.web.catalog.v2';
 const LEGACY_CATALOG_CACHE_KEYS = ['sonara.web.catalog.v1'];
