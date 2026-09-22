@@ -53,6 +53,7 @@ const defaultOrigins = [
   'http://localhost:5173',
   'https://campo-hub.github.io',
   'https://campo-hub.github.io/sonara',
+  'https://sonara-senm.onrender.com',
   'https://sonara-xgmr.onrender.com'
 ];
 
@@ -100,6 +101,8 @@ app.get('/api', (_, res) => {
 
 const catalog = [];
 const uploadedTracks = [];
+const catalogMetadataCache = new Map();
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const r2BucketName = process.env.R2_BUCKET_NAME || '';
 const r2AccountId = process.env.R2_ACCOUNT_ID || '';
@@ -300,13 +303,18 @@ async function getAudioDurationFromObjectKey(objectKey) {
   }
 }
 
-function buildUploadedTrack(file, index, cover, audioUrl, duration = 0) {
-  const sourcePath = file.webkitRelativePath || file.originalname || 'upload';
+function buildTrackIdFromKey(objectKey = '') {
+  const normalized = String(objectKey || '').replace(/^\/+/, '').replace(/\\/g, '/');
+  return `track-${normalized || 'unknown'}`;
+}
+
+function buildUploadedTrack(file, index, cover, audioUrl, duration = 0, objectKey = '') {
+  const sourcePath = objectKey || file.webkitRelativePath || file.originalname || 'upload';
   const folderPath = sourcePath.includes('/') ? sourcePath.split('/').slice(0, -1).join('/') : '';
   const metadata = parseTrackMetadata((sourcePath.split('/').at(-1) || file.originalname || 'track'), folderPath);
 
   return {
-    id: `uploaded-${Date.now()}-${index}`,
+    id: buildTrackIdFromKey(sourcePath),
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
@@ -319,13 +327,13 @@ function buildUploadedTrack(file, index, cover, audioUrl, duration = 0) {
 }
 
 function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
-  const normalized = String(objectKey || '').replace(/^\/+/, '');
+  const normalized = String(objectKey || '').replace(/^\/+/, '').replace(/\\/g, '/');
   const segments = normalized.split('/').filter(Boolean);
   const fileName = segments.at(-1) || 'track';
   const folderPath = segments.length > 1 ? segments.slice(0, -1).join('/') : '';
   const metadata = parseTrackMetadata(fileName, folderPath);
   return {
-    id: `bucket-${normalized}`,
+    id: buildTrackIdFromKey(normalized),
     title: metadata.title,
     artist: metadata.artist,
     album: metadata.album,
@@ -340,6 +348,14 @@ function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
 async function loadCatalogFromBucket() {
   if (!r2Client || !r2BucketName) {
     return [];
+  }
+
+  const now = Date.now();
+  for (const [cacheKey, cachedEntry] of [...catalogMetadataCache.entries()]) {
+    const age = now - (cachedEntry?.fetchedAt || 0);
+    if (age > CATALOG_CACHE_TTL_MS) {
+      catalogMetadataCache.delete(cacheKey);
+    }
   }
 
   const prefixes = ['uploads/', 'music/', 'audio/', ''];
@@ -357,12 +373,22 @@ async function loadCatalogFromBucket() {
       const audioItems = keys.filter((key) => isAudioFile(key));
 
       if (audioItems.length) {
-        return Promise.all(audioItems.map(async (key) => {
+        const resolved = await Promise.all(audioItems.map(async (key) => {
+          const cacheKey = `catalog:${key}`;
+          const cached = catalogMetadataCache.get(cacheKey);
+          if (cached && now - (cached.fetchedAt || 0) <= CATALOG_CACHE_TTL_MS) {
+            return cached.track;
+          }
+
           const folder = getParentFolder(key);
           const coverKey = imageKeys.find((candidate) => getParentFolder(candidate) === folder) || '';
           const duration = await getAudioDurationFromObjectKey(key);
-          return buildBucketTrackFromKey(key, coverKey, duration);
+          const track = buildBucketTrackFromKey(key, coverKey, duration);
+          catalogMetadataCache.set(cacheKey, { fetchedAt: Date.now(), track });
+          return track;
         }));
+
+        return resolved;
       }
     } catch (error) {
       console.error(`Unable to list Cloudflare R2 catalog for prefix "${prefix}":`, error);
@@ -476,7 +502,9 @@ app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
         file.mimetype || 'application/octet-stream',
         file.originalname || file.webkitRelativePath || file.fieldname || objectKey
       );
-      return buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url, duration);
+      const track = buildUploadedTrack(file, index, await getCoverUrl(file), uploadResult.url, duration, objectKey);
+      catalogMetadataCache.set(`catalog:${objectKey}`, { fetchedAt: Date.now(), track });
+      return track;
     }));
 
     uploadedTracks.unshift(...parsedTracks);

@@ -6,11 +6,12 @@ import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, saveCachedCatalo
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const apiBase = import.meta.env.VITE_API_URL || 'https://sonara-xgmr.onrender.com/api';
+const apiBase = import.meta.env.VITE_API_URL || 'https://sonara-senm.onrender.com/api';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_TIMEOUT_MS = 30000;
 const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 const fallbackCatalog = [
   { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
@@ -275,6 +276,12 @@ const isAudioFile = (file) => {
   const type = (file?.type || '').toLowerCase();
   const name = (file?.webkitRelativePath || file?.name || '').toLowerCase();
   return type.startsWith('audio/') || AUDIO_EXTENSIONS.test(name);
+};
+
+const isImageFile = (file) => {
+  const type = (file?.type || '').toLowerCase();
+  const name = (file?.webkitRelativePath || file?.name || '').toLowerCase();
+  return type.startsWith('image/') || IMAGE_EXTENSIONS.test(name);
 };
 
 /* Reads dropped files and, when a folder is dropped, walks it recursively. */
@@ -1630,16 +1637,18 @@ export default function App() {
 
   const updateSelection = (incoming) => {
     const files = Array.from(incoming || []).filter(Boolean);
-    const audioFiles = files.filter(isAudioFile);
+    const audioFiles = files.filter((file) => isAudioFile(file?.webkitRelativePath || file?.name || ''));
+    const imageFiles = files.filter((file) => isImageFile(file?.webkitRelativePath || file?.name || ''));
     setUploadQueue((previous) => (previous && previous.status !== 'running' ? null : previous));
     if (!audioFiles.length) {
       setSelectedFiles([]);
       setUploadMessage({ tone: 'error', text: files.length ? 'No supported audio files were found in that selection.' : 'Nothing was selected.' });
       return;
     }
-    const skipped = files.length - audioFiles.length;
-    setSelectedFiles(audioFiles);
-    setUploadMessage({ tone: 'info', text: `${plural(audioFiles.length, 'track')} ready to upload${skipped ? ` (${plural(skipped, 'other file')} skipped)` : ''}.` });
+    const allFiles = [...audioFiles, ...imageFiles];
+    const skipped = files.length - allFiles.length;
+    setSelectedFiles(allFiles);
+    setUploadMessage({ tone: 'info', text: `${plural(audioFiles.length, 'track')} ready to upload${imageFiles.length ? ` and ${plural(imageFiles.length, 'cover')} included` : ''}${skipped ? ` (${plural(skipped, 'other file')} skipped)` : ''}.` });
   };
 
   const handleInputChange = (event) => {
@@ -1667,11 +1676,13 @@ export default function App() {
 
   const handleUpload = async () => {
     if (isUploading) return;
-    if (!selectedFiles.length) {
+    const audioInputs = selectedFiles.filter((file) => isAudioFile(file?.webkitRelativePath || file?.name || ''));
+    if (!audioInputs.length) {
       setUploadMessage({ tone: 'error', text: 'Choose audio files or a folder before uploading.' });
       return;
     }
 
+    const coverInputs = selectedFiles.filter((file) => isImageFile(file?.webkitRelativePath || file?.name || ''));
     const files = [...selectedFiles];
     const groups = [];
     for (let start = 0; start < files.length; start += batchSize) groups.push(files.slice(start, start + batchSize));
@@ -1717,7 +1728,8 @@ export default function App() {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok && !run.cancelled; attempt += 1) {
         try {
           const formData = new FormData();
-          group.forEach((file) => formData.append('files', file, file.webkitRelativePath || file.name));
+          const groupFiles = [...group, ...coverInputs];
+          groupFiles.forEach((file) => formData.append('files', file, file.webkitRelativePath || file.name));
           let token;
           try {
             token = await getCurrentIdToken();
@@ -2158,7 +2170,7 @@ export default function App() {
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleDrop}
             >
-              <input ref={filesInputRef} type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.oga,.opus,.m4b,.m4r" multiple hidden onChange={handleInputChange} />
+              <input ref={filesInputRef} type="file" accept="audio/*,image/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.oga,.opus,.m4b,.m4r,.jpg,.jpeg,.png,.webp" multiple hidden onChange={handleInputChange} />
               <input
                 ref={(node) => {
                   folderInputRef.current = node;
