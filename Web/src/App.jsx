@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
+import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, saveCachedCatalog } from './catalogUtils.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -7,8 +8,6 @@ import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, is
 
 const apiBase = import.meta.env.VITE_API_URL || 'https://sonara-xgmr.onrender.com/api';
 const STORAGE_KEY = 'sonara.web.prefs.v2';
-const CATALOG_CACHE_KEY = 'sonara.web.catalog.v2';
-const LEGACY_CATALOG_CACHE_KEYS = ['sonara.web.catalog.v1'];
 const CATALOG_TIMEOUT_MS = 30000;
 const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
@@ -21,43 +20,6 @@ const fallbackCatalog = [
   { id: 'seed-velvet-run', title: 'Velvet Run', artist: 'Cinder Avenue', album: 'Night Circuit', seconds: 247, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', addedAt: Date.now() - 5000 },
   { id: 'seed-lunar-kite', title: 'Lunar Kite', artist: 'Harbor Echo', album: 'Cassette Air', seconds: 261, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', addedAt: Date.now() - 6000 }
 ];
-
-/* Sample songs are only ever shown, never saved as if they were the user's library. */
-const isSampleCatalog = (songs) => Array.isArray(songs) && songs.some((song) => String(song?.id || '').startsWith('seed-'));
-
-const getCachedCatalog = () => {
-  try {
-    /* v1 wrongly stored the sample songs, so throw that cache away. */
-    LEGACY_CATALOG_CACHE_KEYS.forEach((key) => window.localStorage.removeItem(key));
-    const raw = window.localStorage.getItem(CATALOG_CACHE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || isSampleCatalog(parsed)) {
-      window.localStorage.removeItem(CATALOG_CACHE_KEY);
-      return [];
-    }
-    return parsed;
-  } catch {
-    return [];
-  }
-};
-
-const saveCachedCatalog = (songs) => {
-  try {
-    if (!Array.isArray(songs) || !songs.length || isSampleCatalog(songs)) return;
-    window.localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(songs));
-  } catch {
-    // storage is unavailable, ignore gracefully
-  }
-};
-
-const clearCachedCatalog = () => {
-  try {
-    window.localStorage.removeItem(CATALOG_CACHE_KEY);
-  } catch {
-    // storage is unavailable, ignore gracefully
-  }
-};
 
 /* Accepts the shapes a backend commonly returns: [..], { songs }, { tracks }, { items }, { data: { songs } } ... */
 const CATALOG_KEYS = ['songs', 'tracks', 'items', 'data', 'catalog', 'results'];
@@ -1337,8 +1299,11 @@ export default function App() {
         setServerOnline(true);
         if (!songs.length) {
           clearCachedCatalog();
-          setCatalog(fallbackCatalog);
-          setCatalogStatus({ state: 'sample', message: 'The server answered, but it has no songs yet. Upload some music and it will replace these samples.' });
+          setCatalog([]);
+          setCatalogStatus({
+            state: 'loading',
+            message: 'The server is reachable, but it has no catalog yet. Waiting for uploads…'
+          });
           return;
         }
         setCatalog(songs);
@@ -1349,7 +1314,7 @@ export default function App() {
         lastError = error;
         if (error?.status && error.status < 500 && error.status !== 408 && error.status !== 429) break;
         if (!silent && attempt === 0 && isCurrent()) {
-          setCatalog((existing) => (existing.length ? existing : cached.length ? cached : fallbackCatalog));
+          setCatalog((existing) => (existing.length ? existing : cached.length ? cached : []));
           setCatalogStatus({ state: 'loading', message: 'The server is not answering yet. Retrying…' });
         }
       }
@@ -1359,8 +1324,8 @@ export default function App() {
     console.error('Unable to load catalog', lastError);
     setServerOnline(false);
     const reason = lastError?.status ? explainCatalogError(lastError) : describeConfigProblem() || explainCatalogError(lastError);
-    setCatalog((existing) => (existing.length && !isSampleCatalog(existing) ? existing : cached.length ? cached : fallbackCatalog));
-    setCatalogStatus({ state: cached.length ? 'cached' : 'sample', message: reason });
+    setCatalog((existing) => (existing.length && !isSampleCatalog(existing) ? existing : cached.length ? cached : []));
+    setCatalogStatus({ state: cached.length ? 'cached' : 'loading', message: reason });
   }, []);
 
   useEffect(() => {
