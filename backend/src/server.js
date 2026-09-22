@@ -99,6 +99,21 @@ app.get('/api', (_, res) => {
   });
 });
 
+app.get('/health', (_, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'sonara-backend',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/test', (_, res) => {
+  res.status(200).json({
+    message: 'Express is responding',
+    timestamp: new Date().toISOString()
+  });
+});
+
 const catalog = [];
 const uploadedTracks = [];
 const catalogMetadataCache = new Map();
@@ -399,6 +414,16 @@ async function loadCatalogFromBucket() {
   return [];
 }
 
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
 function mergeCatalog(bucketTracks = []) {
   const merged = [...catalog, ...uploadedTracks, ...bucketTracks];
   const byId = new Map();
@@ -440,32 +465,57 @@ app.put('/api/me/library', requireAuth, async (req, res) => {
 });
 
 app.get('/api/catalog', async (_, res) => {
-  const bucketTracks = await loadCatalogFromBucket();
-  res.json({ songs: mergeCatalog(bucketTracks) });
+  try {
+    console.log('Catalog request received');
+    const bucketTracks = await withTimeout(loadCatalogFromBucket(), 15000, 'R2 catalog scan');
+    console.log(`Catalog scan completed with ${bucketTracks.length} tracks`);
+    return res.json({ songs: mergeCatalog(bucketTracks) });
+  } catch (error) {
+    console.error('Catalog request failed:', error);
+    return res.status(504).json({
+      message: 'Catalog request timed out or failed while reading storage.',
+      error: error.message || 'Unknown catalog error'
+    });
+  }
 });
 
 app.get('/api/catalog/:id', async (req, res) => {
-  const bucketTracks = await loadCatalogFromBucket();
-  const song = mergeCatalog(bucketTracks).find((item) => item.id === req.params.id);
-  if (!song) {
-    return res.status(404).json({ message: 'Song not found' });
+  try {
+    const bucketTracks = await withTimeout(loadCatalogFromBucket(), 15000, 'R2 catalog lookup');
+    const song = mergeCatalog(bucketTracks).find((item) => item.id === req.params.id);
+    if (!song) {
+      return res.status(404).json({ message: 'Song not found' });
+    }
+    return res.json(song);
+  } catch (error) {
+    console.error('Catalog lookup failed:', error);
+    return res.status(504).json({ message: 'Catalog lookup timed out or failed.', error: error.message || 'Unknown lookup error' });
   }
-  return res.json(song);
 });
 
 app.get('/api/featured', async (_, res) => {
-  const bucketTracks = await loadCatalogFromBucket();
-  const songs = mergeCatalog(bucketTracks);
-  res.json({
-    curated: [songs[0], songs[2] || songs[0]],
-    trending: songs.slice(0, 6),
-    mood: 'Late-night glow'
-  });
+  try {
+    const bucketTracks = await withTimeout(loadCatalogFromBucket(), 15000, 'Featured catalog scan');
+    const songs = mergeCatalog(bucketTracks);
+    return res.json({
+      curated: [songs[0], songs[2] || songs[0]],
+      trending: songs.slice(0, 6),
+      mood: 'Late-night glow'
+    });
+  } catch (error) {
+    console.error('Featured route failed:', error);
+    return res.status(504).json({ message: 'Featured request timed out or failed.', error: error.message || 'Unknown featured error' });
+  }
 });
 
 app.get('/api/uploads', async (_, res) => {
-  const bucketTracks = await loadCatalogFromBucket();
-  res.json({ uploads: mergeCatalog(bucketTracks) });
+  try {
+    const bucketTracks = await withTimeout(loadCatalogFromBucket(), 15000, 'Uploads catalog scan');
+    return res.json({ uploads: mergeCatalog(bucketTracks) });
+  } catch (error) {
+    console.error('Uploads route failed:', error);
+    return res.status(504).json({ message: 'Uploads request timed out or failed.', error: error.message || 'Unknown uploads error' });
+  }
 });
 
 app.post('/api/uploads/bulk', requireAuth, upload.any(), async (req, res) => {
