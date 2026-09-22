@@ -8,6 +8,7 @@ import * as mm from 'music-metadata';
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, detectAudioMimeType, isAudioFile, isImageFile } from './uploadUtils.js';
 import { buildEmptyLibraryPayload } from './libraryUtils.js';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 
 dotenv.config();
 
@@ -119,6 +120,29 @@ const uploadedTracks = [];
 const catalogMetadataCache = new Map();
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
+function mergeCatalog(items = []) {
+  const deduped = new Map();
+  const sources = [...catalog, ...uploadedTracks, ...items];
+
+  for (const item of sources) {
+    if (!item || typeof item !== 'object') continue;
+    const key = String(item.id || item._id || item.audioUrl || item.url || item.title || '');
+    if (!key) continue;
+    deduped.set(key, { ...item });
+  }
+
+  return [...deduped.values()].filter((item) => item && (item.audioUrl || item.url || item.source === 'bucket'));
+}
+
+async function withTimeout(promise, ms, label = 'request') {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    })
+  ]);
+}
+
 const r2BucketName = process.env.R2_BUCKET_NAME || '';
 const r2AccountId = process.env.R2_ACCOUNT_ID || '';
 const r2PublicBaseUrl = process.env.R2_PUBLIC_BASE_URL || '';
@@ -131,7 +155,12 @@ const r2Client = r2BucketName && process.env.R2_ACCESS_KEY_ID && process.env.R2_
         accessKeyId: process.env.R2_ACCESS_KEY_ID,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
       },
-      forcePathStyle: false
+      forcePathStyle: false,
+      requestHandler: new NodeHttpHandler({
+        connectionTimeout: 5000,
+        socketTimeout: 10000,
+        maxSockets: 20
+      })
     })
   : null;
 
@@ -360,80 +389,29 @@ function buildBucketTrackFromKey(objectKey, coverKey = '', duration = 0) {
   };
 }
 
+let catalogScanPromise = null;
+
 async function loadCatalogFromBucket() {
-  if (!r2Client || !r2BucketName) {
-    return [];
+  if (catalogScanPromise) return catalogScanPromise;
+
+  catalogScanPromise = (async () => {
+    const response = await r2Client.send(new ListObjectsV2Command({
+      Bucket: r2BucketName,
+      Prefix: '',
+      MaxKeys: 200
+    }));
+
+    const keys = (response.Contents || []).map((item) => item.Key).filter(Boolean);
+    const audioItems = keys.filter((key) => isAudioFile(key)).slice(0, 50);
+
+    return audioItems.map((key) => buildBucketTrackFromKey(key, '', 0));
+  })();
+
+  try {
+    return await catalogScanPromise;
+  } finally {
+    catalogScanPromise = null;
   }
-
-  const now = Date.now();
-  for (const [cacheKey, cachedEntry] of [...catalogMetadataCache.entries()]) {
-    const age = now - (cachedEntry?.fetchedAt || 0);
-    if (age > CATALOG_CACHE_TTL_MS) {
-      catalogMetadataCache.delete(cacheKey);
-    }
-  }
-
-  const prefixes = ['uploads/', 'music/', 'audio/', ''];
-
-  for (const prefix of prefixes) {
-    try {
-      const response = await r2Client.send(new ListObjectsV2Command({
-        Bucket: r2BucketName,
-        Prefix: prefix
-      }));
-
-      const objects = Array.isArray(response.Contents) ? response.Contents : [];
-      const keys = objects.map((item) => item.Key).filter(Boolean);
-      const imageKeys = keys.filter((key) => isImageFile(key));
-      const audioItems = keys.filter((key) => isAudioFile(key));
-
-      if (audioItems.length) {
-        const resolved = await Promise.all(audioItems.map(async (key) => {
-          const cacheKey = `catalog:${key}`;
-          const cached = catalogMetadataCache.get(cacheKey);
-          if (cached && now - (cached.fetchedAt || 0) <= CATALOG_CACHE_TTL_MS) {
-            return cached.track;
-          }
-
-          const folder = getParentFolder(key);
-          const coverKey = imageKeys.find((candidate) => getParentFolder(candidate) === folder) || '';
-          const duration = await getAudioDurationFromObjectKey(key);
-          const track = buildBucketTrackFromKey(key, coverKey, duration);
-          catalogMetadataCache.set(cacheKey, { fetchedAt: Date.now(), track });
-          return track;
-        }));
-
-        return resolved;
-      }
-    } catch (error) {
-      console.error(`Unable to list Cloudflare R2 catalog for prefix "${prefix}":`, error);
-    }
-  }
-
-  console.warn(`Cloudflare R2 bucket "${r2BucketName}" did not contain audio files under the known prefixes; returning an empty catalog instead of sample data.`);
-  return [];
-}
-
-function withTimeout(promise, timeoutMs, label) {
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    })
-  ]).finally(() => clearTimeout(timer));
-}
-
-function mergeCatalog(bucketTracks = []) {
-  const merged = [...catalog, ...uploadedTracks, ...bucketTracks];
-  const byId = new Map();
-
-  merged.forEach((track) => {
-    if (!track || !track.id) return;
-    byId.set(track.id, track);
-  });
-
-  return [...byId.values()];
 }
 
 app.get('/api/health', (_, res) => {
