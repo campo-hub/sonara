@@ -13,7 +13,7 @@ import {
   buildFallbackCatalog
 } from './uploadUtils.js';
 import { isStorageConfigured, putObject, publicUrlFor } from './storage.js';
-import { upsertTrack, listTracks, storageMode, isMongoConfigured } from './catalogStore.js';
+import { upsertTrack, listTracks } from './catalogStore.js';
 import { buildEmptyLibraryPayload } from './libraryUtils.js';
 import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
 
@@ -107,16 +107,17 @@ app.get('/api/health', async (_req, res) => {
  */
 app.get('/api/catalog', async (_req, res) => {
   try {
-    const tracks = await listTracks();
-    if (!tracks.length && String(process.env.SEED_FALLBACK_CATALOG || '').toLowerCase() === 'true') {
-      // Explicit opt-in only (env flag), so demo/sample tracks never
-      // silently mix into a real deployment's catalog unless asked for.
-      return res.json({ songs: buildFallbackCatalog() });
+    let tracks = await listTracks();
+
+    if (!tracks.length) {
+      await syncBucketCatalogIntoMongo();
+      tracks = await listTracks();
     }
-    res.json({ songs: tracks });
+
+    return res.json({ songs: tracks });
   } catch (error) {
-    console.error('[catalog] failed to list tracks', error);
-    res.status(500).json({ message: 'Unable to load the catalog right now.' });
+    console.error('[catalog] failed', error);
+    return res.status(500).json({ message: 'Unable to load the catalog right now.' });
   }
 });
 
@@ -284,3 +285,29 @@ app.listen(port, '0.0.0.0', () => {
 });
 
 export default app;
+
+async function syncBucketCatalogIntoMongo() {
+  const objects = await listObjects('uploads/');
+  const audioObjects = objects.filter((obj) =>
+    /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/i.test(obj.Key || '')
+  );
+
+  for (const obj of audioObjects.slice(0, 200)) {
+    const key = obj.Key;
+    const fileName = key.split('/').pop() || 'track';
+    const track = {
+      id: `track-${key.replace(/^\/+/, '').replace(/\\/g, '/')}`,
+      title: fileName.replace(/\.[^/.]+$/, ''),
+      artist: 'Unknown artist',
+      album: 'Uploads',
+      duration: 0,
+      cover: '',
+      audioUrl: publicUrlFor(key),
+      objectKey: key,
+      source: 'bucket',
+      createdAt: new Date().toISOString()
+    };
+
+    await upsertTrack(track);
+  }
+}
