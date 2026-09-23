@@ -39,20 +39,35 @@ const configuredOrigins = String(process.env.CORS_ORIGIN || '')
   .map((value) => value.trim())
   .filter(Boolean);
 
+const defaultAllowedOrigins = new Set([
+  'https://campo-hub.github.io',
+  'https://www.campo-hub.github.io',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173'
+]);
+
+const allowedOrigins = new Set([...configuredOrigins, ...defaultAllowedOrigins]);
+
 if (!configuredOrigins.length) {
-  console.warn('[cors] CORS_ORIGIN is not set - allowing all origins. Set CORS_ORIGIN in production.');
+  console.warn('[cors] CORS_ORIGIN is not set - using the app defaults for local and GitHub Pages access.');
 }
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!configuredOrigins.length) return callback(null, true);
-      if (!origin) return callback(null, true); // curl/health checks/no Origin header
-      if (configuredOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`Origin ${origin} is not allowed.`));
-    }
-  })
-);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true); // curl/health checks/no Origin header
+    if (!configuredOrigins.length || allowedOrigins.has(origin)) return callback(null, true);
+    callback(new Error(`Origin ${origin} is not allowed.`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 /* -------------------------------------------------------------------------- */
 /*  Auth (optional - app works read-only without Firebase configured)         */
