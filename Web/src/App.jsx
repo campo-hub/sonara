@@ -6,12 +6,24 @@ import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, saveCachedCatalo
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const apiBase = import.meta.env.VITE_API_URL || 'https://sonara-senm.onrender.com/api';
+/*
+ * Previously this fell back to a hardcoded Render URL when VITE_API_URL
+ * wasn't set. That URL drifted out of sync with whatever was actually
+ * live (a different value was baked in by CI, another by local .env, and
+ * a third was the real Render dashboard URL) - so a missing env var
+ * failed silently and pointed at the wrong, possibly-dead host instead
+ * of failing loudly. Now: no env var means no guessed fallback. The app
+ * still runs (so you can see the UI), but every network call is skipped
+ * and a visible banner explains exactly what's missing.
+ */
+const CONFIGURED_API_BASE = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const isLocalDev = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const apiBase = CONFIGURED_API_BASE || (isLocalDev ? 'http://localhost:4000/api' : '');
+const API_MISCONFIGURED = !apiBase;
 const STORAGE_KEY = 'sonara.web.prefs.v2';
 const CATALOG_TIMEOUT_MS = 30000;
 const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 const fallbackCatalog = [
   { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
@@ -52,6 +64,9 @@ const requestWithTimeout = async (url, ms) => {
 
 /* The two setup mistakes that most often make a deployed site look "broken". */
 const describeConfigProblem = () => {
+  if (API_MISCONFIGURED) {
+    return 'VITE_API_URL was not set when this build was made, so the app has no backend address to call. Set VITE_API_URL (ending in /api) and rebuild.';
+  }
   try {
     const local = ['localhost', '127.0.0.1', '[::1]'];
     const target = new URL(apiBase, window.location.href);
@@ -276,12 +291,6 @@ const isAudioFile = (file) => {
   const type = (file?.type || '').toLowerCase();
   const name = (file?.webkitRelativePath || file?.name || '').toLowerCase();
   return type.startsWith('audio/') || AUDIO_EXTENSIONS.test(name);
-};
-
-const isImageFile = (file) => {
-  const type = (file?.type || '').toLowerCase();
-  const name = (file?.webkitRelativePath || file?.name || '').toLowerCase();
-  return type.startsWith('image/') || IMAGE_EXTENSIONS.test(name);
 };
 
 /* Reads dropped files and, when a folder is dropped, walks it recursively. */
@@ -1292,6 +1301,15 @@ export default function App() {
     const isCurrent = () => catalogRequestRef.current === requestId;
     const cached = getCachedCatalog();
 
+    if (API_MISCONFIGURED) {
+      // Don't burn a 30s timeout hitting nothing - fail immediately with
+      // a message that says exactly what to fix.
+      setServerOnline(false);
+      setCatalog(cached);
+      setCatalogStatus({ state: cached.length ? 'cached' : 'loading', message: describeConfigProblem() });
+      return;
+    }
+
     if (!silent) {
       setCatalog((existing) => (existing.length ? existing : cached));
       setCatalogStatus({ state: 'loading', message: '' });
@@ -1637,18 +1655,16 @@ export default function App() {
 
   const updateSelection = (incoming) => {
     const files = Array.from(incoming || []).filter(Boolean);
-    const audioFiles = files.filter((file) => isAudioFile(file?.webkitRelativePath || file?.name || ''));
-    const imageFiles = files.filter((file) => isImageFile(file?.webkitRelativePath || file?.name || ''));
+    const audioFiles = files.filter(isAudioFile);
     setUploadQueue((previous) => (previous && previous.status !== 'running' ? null : previous));
     if (!audioFiles.length) {
       setSelectedFiles([]);
       setUploadMessage({ tone: 'error', text: files.length ? 'No supported audio files were found in that selection.' : 'Nothing was selected.' });
       return;
     }
-    const allFiles = [...audioFiles, ...imageFiles];
-    const skipped = files.length - allFiles.length;
-    setSelectedFiles(allFiles);
-    setUploadMessage({ tone: 'info', text: `${plural(audioFiles.length, 'track')} ready to upload${imageFiles.length ? ` and ${plural(imageFiles.length, 'cover')} included` : ''}${skipped ? ` (${plural(skipped, 'other file')} skipped)` : ''}.` });
+    const skipped = files.length - audioFiles.length;
+    setSelectedFiles(audioFiles);
+    setUploadMessage({ tone: 'info', text: `${plural(audioFiles.length, 'track')} ready to upload${skipped ? ` (${plural(skipped, 'other file')} skipped)` : ''}.` });
   };
 
   const handleInputChange = (event) => {
@@ -1676,13 +1692,11 @@ export default function App() {
 
   const handleUpload = async () => {
     if (isUploading) return;
-    const audioInputs = selectedFiles.filter((file) => isAudioFile(file?.webkitRelativePath || file?.name || ''));
-    if (!audioInputs.length) {
+    if (!selectedFiles.length) {
       setUploadMessage({ tone: 'error', text: 'Choose audio files or a folder before uploading.' });
       return;
     }
 
-    const coverInputs = selectedFiles.filter((file) => isImageFile(file?.webkitRelativePath || file?.name || ''));
     const files = [...selectedFiles];
     const groups = [];
     for (let start = 0; start < files.length; start += batchSize) groups.push(files.slice(start, start + batchSize));
@@ -1728,8 +1742,7 @@ export default function App() {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok && !run.cancelled; attempt += 1) {
         try {
           const formData = new FormData();
-          const groupFiles = [...group, ...coverInputs];
-          groupFiles.forEach((file) => formData.append('files', file, file.webkitRelativePath || file.name));
+          group.forEach((file) => formData.append('files', file, file.webkitRelativePath || file.name));
           let token;
           try {
             token = await getCurrentIdToken();
@@ -2170,7 +2183,7 @@ export default function App() {
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleDrop}
             >
-              <input ref={filesInputRef} type="file" accept="audio/*,image/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.oga,.opus,.m4b,.m4r,.jpg,.jpeg,.png,.webp" multiple hidden onChange={handleInputChange} />
+              <input ref={filesInputRef} type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.oga,.opus,.m4b,.m4r" multiple hidden onChange={handleInputChange} />
               <input
                 ref={(node) => {
                   folderInputRef.current = node;
@@ -2407,7 +2420,24 @@ export default function App() {
         ref={audioRef}
         preload="metadata"
         onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-        onLoadedMetadata={(event) => setAudioDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onLoadedMetadata={(event) => {
+          const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
+          setAudioDuration(dur);
+          /* Defense in depth: the backend now computes duration once at
+             upload time, so this shouldn't normally be needed. It only
+             matters for tracks uploaded before that fix, whose cached
+             catalog entry still says 0 - once played, the browser's own
+             decode fixes the display everywhere, not just the mini-player. */
+          if (!current || dur <= 0 || (current.seconds && current.seconds > 0)) return;
+          setCatalog((previous) => {
+            const next = previous.map((song) => {
+              const songId = String(song?.id ?? song?._id ?? '');
+              return songId === current.id ? { ...song, duration: dur, seconds: dur } : song;
+            });
+            saveCachedCatalog(next);
+            return next;
+          });
+        }}
         onEnded={() => advanceRef.current(true)}
         onError={() => {
           if (current?.src) {
