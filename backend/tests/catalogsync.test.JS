@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { syncBucketIntoCatalog } from '../src/catalogSync.js';
+import { syncBucketIntoCatalog } from '../src/catalogsync.js';
 import { deriveTrackId } from '../src/uploadUtils.js';
 
-const makeDeps = ({ objects, existing = [], base = 'https://pub.r2.dev' }) => {
+const makeDeps = ({ objects, existing = [], base = 'https://pub-de00b21f1e9743ce91e7947956335a70.r2.dev' }) => {
   const store = [...existing];
   return {
     store,
