@@ -284,6 +284,11 @@ class MediaService : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private fun getAlbumArt(uri: Uri?): Bitmap? {
         if (uri == null) return null
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == "http" || scheme == "https") {
+            // Avoid blocking main thread with network I/O
+            return null
+        }
         return try {
             val inputStream: InputStream? = contentResolver.openInputStream(uri)
             BitmapFactory.decodeStream(inputStream)

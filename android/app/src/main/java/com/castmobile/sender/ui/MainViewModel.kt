@@ -15,6 +15,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sonara.app.api.SonaraApiClient
 import com.sonara.app.dj.DJSessionPlanner
 import com.sonara.app.dj.ListeningHistory
 import com.sonara.app.dj.PreferenceEngine
@@ -29,6 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -113,6 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var duration by mutableLongStateOf(0L)
 
     var selectedTab by mutableIntStateOf(0)
+    var contextLabel by mutableStateOf("All Music")
 
     // Sorting State
     var sortType by mutableStateOf("Name") // "Name", "Date", "Size"
@@ -259,7 +262,294 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("eq_enabled", enabled).apply()
     }
 
+    // Online / Offline Mode State
+    private val apiClient = SonaraApiClient()
+
+    var isOnlineMode by mutableStateOf(prefs.getBoolean("is_online_mode", false))
+        private set
+
+    var apiBaseUrl by mutableStateOf(prefs.getString("api_base_url", "https://sonara-xgmr.onrender.com/api") ?: "https://sonara-xgmr.onrender.com/api")
+        private set
+
+    var isOnlineLoading by mutableStateOf(false)
+        private set
+
+    var onlineError by mutableStateOf<String?>(null)
+        private set
+
+    var idToken by mutableStateOf(prefs.getString("id_token", null))
+        private set
+
+    var userEmail by mutableStateOf(prefs.getString("user_email", null))
+        private set
+
+    var hasAdmin by mutableStateOf(true)
+        private set
+
+    var isAdmin by mutableStateOf(false)
+        private set
+
+    var adminStatsJson by mutableStateOf<String?>(null)
+        private set
+
+    init {
+        checkAdminStatus()
+    }
+
+    fun checkAdminStatus() {
+        viewModelScope.launch {
+            hasAdmin = apiClient.checkAdminStatus(apiBaseUrl)
+        }
+    }
+
+    fun checkIsAdmin() {
+        val token = idToken ?: return
+        viewModelScope.launch {
+            isAdmin = apiClient.checkIsAdmin(apiBaseUrl, token)
+        }
+    }
+
+    fun claimAdminAccount(emailStr: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val success = apiClient.claimAdminAccount(apiBaseUrl, idToken, emailStr)
+            if (success) {
+                hasAdmin = true
+                isAdmin = true
+                onResult(true, "👑 Admin Account claimed successfully!")
+                loadAdminStats()
+            } else {
+                onResult(false, "Admin account has already been claimed.")
+            }
+        }
+    }
+
+    fun loadAdminStats() {
+        viewModelScope.launch {
+            val stats = apiClient.fetchAdminStats(apiBaseUrl, idToken)
+            if (stats != null) {
+                adminStatsJson = stats
+            }
+        }
+    }
+
+    private val _remoteTracks = mutableStateOf<List<Track>>(emptyList())
+    var remoteTracks: List<Track>
+        get() = _remoteTracks.value
+        private set(value) { _remoteTracks.value = value }
+
+    fun toggleOnlineMode(online: Boolean) {
+        isOnlineMode = online
+        prefs.edit().putBoolean("is_online_mode", online).apply()
+        loadMusic()
+    }
+
+    fun updateApiBaseUrl(url: String) {
+        val clean = url.trim()
+        val normalized = if (clean.isBlank()) "https://sonara-xgmr.onrender.com/api" else clean
+        apiBaseUrl = normalized
+        prefs.edit().putString("api_base_url", normalized).apply()
+        if (isOnlineMode) {
+            loadOnlineCatalog()
+            checkAdminStatus()
+        }
+    }
+
+    fun setUserAuth(email: String?, token: String?) {
+        userEmail = email
+        idToken = token
+        prefs.edit()
+            .putString("user_email", email)
+            .putString("id_token", token)
+            .apply()
+        if (token != null && isOnlineMode) {
+            fetchUserLibraryFromCloud()
+            checkIsAdmin()
+        } else {
+            isAdmin = false
+        }
+    }
+
+    fun firebaseSignIn(emailStr: String, passStr: String, isRegister: Boolean, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = if (isRegister) {
+                apiClient.firebaseSignUpWithEmail(emailStr, passStr)
+            } else {
+                apiClient.firebaseSignInWithEmail(emailStr, passStr)
+            }
+            if (result.success && result.token != null && result.email != null) {
+                setUserAuth(result.email, result.token)
+                onResult(true, if (isRegister) "Account created!" else "Signed in!")
+            } else {
+                onResult(false, result.errorMessage ?: "Authentication failed")
+            }
+        }
+    }
+
+    fun firebaseGoogleSignIn(googleEmail: String, googleToken: String? = null, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = apiClient.firebaseSignInWithGoogle(googleEmail, googleToken)
+            if (result.success && result.token != null && result.email != null) {
+                setUserAuth(result.email, result.token)
+                onResult(true, "Signed in with Google!")
+            } else {
+                onResult(false, result.errorMessage ?: "Google auth failed")
+            }
+        }
+    }
+
     fun loadMusic() {
+        if (isOnlineMode) {
+            loadOnlineCatalog()
+        } else {
+            loadLocalMusic()
+        }
+    }
+
+    fun loadOnlineCatalog() {
+        viewModelScope.launch {
+            isOnlineLoading = true
+            onlineError = null
+            try {
+                val tracks: List<Track> = apiClient.fetchCatalog(apiBaseUrl)
+                _remoteTracks.value = tracks
+                allTracks = tracks
+
+                // Group remote tracks into folders
+                val groupedMap = tracks.groupBy { it.folderName }
+                val groupedFolders = mutableListOf<Folder>()
+                for (entry in groupedMap) {
+                    groupedFolders.add(
+                        Folder(
+                            name = entry.key,
+                            trackCount = entry.value.size,
+                            tracks = entry.value,
+                            coverArtUri = entry.value.firstOrNull { it.albumArtUri != null }?.albumArtUri
+                        )
+                    )
+                }
+                folders = groupedFolders.sortedBy { it.name }
+
+                // Artist folders
+                val artistMap = tracks.groupBy { track ->
+                    track.artist.split(",", "&", ";", "/").first().trim()
+                }
+                val artistList = mutableListOf<Folder>()
+                for (entry in artistMap) {
+                    artistList.add(
+                        Folder(
+                            name = entry.key,
+                            trackCount = entry.value.size,
+                            tracks = entry.value,
+                            coverArtUri = entry.value.firstOrNull { it.albumArtUri != null }?.albumArtUri
+                        )
+                    )
+                }
+                artistFolders = artistList.sortedBy { it.name }
+
+                updateUserPlaylistsTracks()
+
+                if (currentTrack == null && tracks.size > 0) {
+                    val firstSong = tracks[0]
+                    currentTrack = firstSong
+                    duration = firstSong.duration
+                }
+
+                if (!idToken.isNullOrBlank()) {
+                    fetchUserLibraryFromCloud()
+                }
+            } catch (e: Exception) {
+                onlineError = e.message ?: "Unable to reach Sonara Render server"
+            } finally {
+                isOnlineLoading = false
+            }
+        }
+    }
+
+    fun fetchUserLibraryFromCloud() {
+        val token = idToken ?: return
+        if (!isOnlineMode) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val responseStr = apiClient.fetchUserLibrary(apiBaseUrl, token) ?: return@launch
+                val json = JSONObject(responseStr)
+                if (json.has("preferences")) {
+                    val prefsObj = json.getJSONObject("preferences")
+                    if (prefsObj.has("liked")) {
+                        val likedArray = prefsObj.getJSONArray("liked")
+                        val set = mutableSetOf<Long>()
+                        for (i in 0 until likedArray.length()) {
+                            set.add(likedArray.getLong(i))
+                        }
+                        withContext(Dispatchers.Main) {
+                            favoriteTracks.value = set
+                            prefs.edit().putStringSet("favorites", set.map { it.toString() }.toSet()).apply()
+                            updateUserPlaylistsTracks()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore background fetch failure
+            }
+        }
+    }
+
+    fun syncUserLibraryToCloud() {
+        val token = idToken ?: return
+        if (!isOnlineMode) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val favList = favoriteTracks.value.toList()
+                val playlistMap = mutableMapOf<String, List<Long>>()
+                for (p in userPlaylists) {
+                    if (p.name != "Favorites") {
+                        playlistMap[p.name] = p.tracks.map { it.id }
+                    }
+                }
+
+                val json = JSONObject()
+                val prefsObj = JSONObject()
+                val likedArray = JSONArray()
+                favList.forEach { likedArray.put(it) }
+                prefsObj.put("liked", likedArray)
+                json.put("preferences", prefsObj)
+
+                val playlistsArray = JSONArray()
+                for ((pName, pTracks) in playlistMap) {
+                    val pObj = JSONObject()
+                    pObj.put("name", pName)
+                    val tArray = JSONArray()
+                    pTracks.forEach { tArray.put(it) }
+                    pObj.put("tracks", tArray)
+                    playlistsArray.put(pObj)
+                }
+                json.put("playlists", playlistsArray)
+
+                apiClient.syncUserLibrary(apiBaseUrl, token, json.toString())
+            } catch (e: Exception) {
+                // Ignore background sync failure
+            }
+        }
+    }
+
+    fun uploadFilesToOnlineServer(context: Context, fileUris: List<android.net.Uri>, onResult: (Boolean, String) -> Unit) {
+        if (!isOnlineMode) return
+        viewModelScope.launch {
+            isOnlineLoading = true
+            try {
+                val uploaded: List<Track> = apiClient.uploadAudioFiles(apiBaseUrl, idToken, context, fileUris)
+                _remoteTracks.value = uploaded + _remoteTracks.value
+                allTracks = _remoteTracks.value
+                loadOnlineCatalog()
+                onResult(true, "${uploaded.size} tracks uploaded successfully.")
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Upload failed.")
+            } finally {
+                isOnlineLoading = false
+            }
+        }
+    }
+
+    private fun loadLocalMusic() {
         viewModelScope.launch(Dispatchers.IO) {
             val allFoldersList = repository.getAllFolders().filter { folder ->
                 !folder.name.lowercase().contains("backup") && 
@@ -295,6 +585,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun saveFavorites() {
         prefs.edit().putStringSet("favorites", favoriteTracks.value.map { it.toString() }.toSet()).apply()
         updateUserPlaylistsTracks()
+        syncUserLibraryToCloud()
     }
 
     private fun loadUserPlaylists() {}
@@ -520,6 +811,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     playbackQueue.add(0, current)
                 }
             }
+        }
+    }
+
+    fun startPlayback(tracks: List<Track>, startIndex: Int, label: String = "All Music", shuffleOverride: Boolean? = null) {
+        if (tracks.isEmpty()) return
+        val targetIndex = if (startIndex < 0) 0 else if (startIndex >= tracks.size) tracks.size - 1 else startIndex
+        val firstTrack = tracks[targetIndex]
+        
+        val useShuffle = shuffleOverride ?: isShuffle
+        isShuffle = useShuffle
+        isDjMode = false
+        contextLabel = label
+        
+        val queue = mutableListOf<Track>()
+        if (useShuffle) {
+            queue.add(firstTrack)
+            val rest = mutableListOf<Track>()
+            for (i in 0 until tracks.size) {
+                if (i != targetIndex) rest.add(tracks[i])
+            }
+            rest.shuffle()
+            queue.addAll(rest)
+        } else {
+            queue.addAll(tracks)
+        }
+        
+        playbackQueue.clear()
+        playbackQueue.addAll(queue)
+        
+        val playIndex = if (useShuffle) 0 else targetIndex
+        playTrack(queue[playIndex], queue)
+    }
+
+    fun playFromList(tracks: List<Track>, index: Int, label: String = "All Music") {
+        val target = if (index in 0 until tracks.size) tracks[index] else return
+        if (currentTrack?.id == target.id) {
+            togglePlayback()
+            return
+        }
+        startPlayback(tracks, index, label)
+    }
+
+    fun getUpNextTracks(count: Int = 5): List<Pair<Track, Int>> {
+        val result = mutableListOf<Pair<Track, Int>>()
+        if (isDjMode) {
+            val limit = if (count < djQueue.size) count else djQueue.size
+            for (i in 0 until limit) {
+                result.add(Pair(djQueue[i], i))
+            }
+            return result
+        }
+        val current = currentTrack ?: return emptyList()
+        val currentIndex = playbackQueue.indexOfFirst { it.id == current.id }
+        if (currentIndex == -1 || currentIndex >= playbackQueue.size - 1) return emptyList()
+        val end = if (currentIndex + 1 + count < playbackQueue.size) currentIndex + 1 + count else playbackQueue.size
+        for (i in (currentIndex + 1) until end) {
+            result.add(Pair(playbackQueue[i], i))
+        }
+        return result
+    }
+
+    fun jumpToQueueIndex(index: Int) {
+        if (isDjMode) {
+            if (index in djQueue.indices) {
+                val track = djQueue.removeAt(index)
+                playTrack(track, emptyList(), djMode = true)
+            }
+            return
+        }
+        if (index in playbackQueue.indices) {
+            val track = playbackQueue[index]
+            playTrack(track, playbackQueue)
         }
     }
 

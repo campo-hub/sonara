@@ -17,6 +17,7 @@ import { isStorageConfigured, listObjects, putObject, publicUrlFor } from './sto
 import { upsertTrack, listTracks, storageMode, isMongoConfigured } from './catalogStore.js';
 import { buildEmptyLibraryPayload } from './libraryUtils.js';
 import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
+import { getAdminConfig, claimAdmin, isAdminUser } from './adminStore.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -306,6 +307,9 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
       }
 
       const id = deriveTrackId(objectKey);
+      const uploaderEmail = req.user?.email || null;
+      const uploaderName = req.user?.name || req.user?.displayName || uploaderEmail?.split('@')[0] || 'Community Uploader';
+
       const track = {
         id,
         title: metadata.title,
@@ -316,7 +320,10 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
         audioUrl,
         objectKey,
         source: 'upload',
-        uploadedBy: req.user?.uid || null,
+        uploadedBy: req.user?.uid || uploaderEmail || 'anonymous',
+        uploadedByEmail: uploaderEmail,
+        uploadedByName: uploaderName,
+        fileSizeBytes: file.buffer?.length || 0,
         createdAt: new Date().toISOString()
       };
 
@@ -372,6 +379,148 @@ app.put('/api/me/library', async (req, res) => {
   } catch (error) {
     console.error('[library] write failed', error);
     res.status(500).json({ message: 'Unable to sync your library right now.' });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Admin & Billing API                                                       */
+/* -------------------------------------------------------------------------- */
+
+app.get('/api/admin/check', async (_req, res) => {
+  try {
+    const admin = await getAdminConfig();
+    res.json({
+      hasAdmin: Boolean(admin),
+      adminEmail: admin?.email || null,
+      claimedAt: admin?.claimedAt || null
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/admin/me', async (req, res) => {
+  try {
+    const isAdmin = await isAdminUser(req.user);
+    const admin = await getAdminConfig();
+    res.json({
+      isAdmin,
+      userEmail: req.user?.email || null,
+      adminEmail: admin?.email || null
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/admin/claim', async (req, res) => {
+  try {
+    const existing = await getAdminConfig();
+    if (existing) {
+      return res.status(403).json({ message: 'Admin account has already been claimed.' });
+    }
+
+    const email = req.body?.email || req.user?.email || 'admin@sonara.app';
+    const uid = req.user?.uid || 'admin_uid_' + Date.now();
+    const displayName = req.body?.displayName || req.user?.name || email.split('@')[0];
+
+    const result = await claimAdmin({ uid, email, displayName });
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    res.json({ ok: true, admin: result.admin });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    const admin = await getAdminConfig();
+    const isCallerAdmin = await isAdminUser(req.user);
+
+    if (admin && !isCallerAdmin) {
+      return res.status(403).json({ message: 'Access denied: Admin privileges required.' });
+    }
+
+    const tracks = await listTracks();
+    const R2_COST_PER_GB_USD = 0.015; // $0.015/GB beyond 10GB free tier
+
+    const userMap = new Map();
+    let totalBytes = 0;
+
+    for (const track of tracks) {
+      const size = Number(track.fileSizeBytes) || (5 * 1024 * 1024); // fallback ~5MB
+      totalBytes += size;
+
+      const userKey = track.uploadedByEmail || track.uploadedBy || 'Community';
+      const userName = track.uploadedByName || userKey.split('@')[0] || 'Community Uploader';
+
+      if (!userMap.has(userKey)) {
+        userMap.set(userKey, {
+          userKey,
+          email: track.uploadedByEmail || (userKey.includes('@') ? userKey : 'N/A'),
+          displayName: userName,
+          trackCount: 0,
+          totalBytes: 0,
+          tracks: []
+        });
+      }
+
+      const userData = userMap.get(userKey);
+      userData.trackCount += 1;
+      userData.totalBytes += size;
+      userData.tracks.push({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        sizeBytes: size,
+        createdAt: track.createdAt
+      });
+    }
+
+    const totalGB = totalBytes / (1024 * 1024 * 1024);
+    const freeTierGB = 10;
+    const billableGB = Math.max(0, totalGB - freeTierGB);
+    const totalEstimatedMonthlyCostUSD = billableGB * R2_COST_PER_GB_USD;
+
+    const userBreakdown = Array.from(userMap.values()).map((u) => {
+      const userGB = u.totalBytes / (1024 * 1024 * 1024);
+      const userShare = totalBytes > 0 ? (u.totalBytes / totalBytes) : 0;
+      const userBillableGB = Math.max(0, userGB - (freeTierGB * userShare));
+      return {
+        userKey: u.userKey,
+        email: u.email,
+        displayName: u.displayName,
+        trackCount: u.trackCount,
+        totalBytes: u.totalBytes,
+        totalMB: Number((u.totalBytes / (1024 * 1024)).toFixed(2)),
+        totalGB: Number(userGB.toFixed(3)),
+        sharePercentage: Number((userShare * 100).toFixed(1)),
+        estimatedMonthlyCostUSD: Number((userBillableGB * R2_COST_PER_GB_USD).toFixed(4))
+      };
+    }).sort((a, b) => b.totalBytes - a.totalBytes);
+
+    res.json({
+      ok: true,
+      admin: admin || null,
+      summary: {
+        totalTracks: tracks.length,
+        totalUsers: userBreakdown.length,
+        totalStorageBytes: totalBytes,
+        totalStorageMB: Number((totalBytes / (1024 * 1024)).toFixed(2)),
+        totalStorageGB: Number(totalGB.toFixed(3)),
+        r2FreeTierGB: freeTierGB,
+        billableGB: Number(billableGB.toFixed(3)),
+        totalEstimatedMonthlyCostUSD: Number(totalEstimatedMonthlyCostUSD.toFixed(4)),
+        costPerGBUSD: R2_COST_PER_GB_USD
+      },
+      userBreakdown
+    });
+  } catch (error) {
+    console.error('[admin stats] error', error);
+    res.status(500).json({ message: error.message });
   }
 });
 

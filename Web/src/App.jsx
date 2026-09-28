@@ -129,7 +129,8 @@ const pageMeta = {
   playlists: { title: 'Playlists', subtitle: 'Collections built around your sound and mood.' },
   favorites: { title: 'Favorites', subtitle: 'The songs you keep coming back to.' },
   upload: { title: 'Add music', subtitle: 'Bring in tracks, albums or whole folders. Big batches go in small groups.' },
-  lab: { title: 'Appearance Lab', subtitle: 'Make Sonara look and feel the way you like.' }
+  lab: { title: 'Appearance Lab', subtitle: 'Make Sonara look and feel the way you like.' },
+  admin: { title: '👑 Admin Billing', subtitle: 'Cloudflare R2 storage metrics & cost calculator.' }
 };
 
 const sortOptions = [
@@ -817,7 +818,7 @@ function PageBanner({ id, title, subtitle }) {
   );
 }
 
-function AuthDialog({ mode, reason, onClose, onSignedIn, onModeChange }) {
+function AuthDialog({ mode, reason, hasAdmin, onClaimAdmin, onClose, onSignedIn, onModeChange }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -849,6 +850,26 @@ function AuthDialog({ mode, reason, onClose, onSignedIn, onModeChange }) {
         <span className="auth-kicker">Sonara account</span>
         <h2 id="auth-title">{mode === 'register' ? 'Create your account' : 'Welcome back'}</h2>
         <p className="auth-reason">{reason}</p>
+        {!hasAdmin && (
+          <button
+            type="button"
+            className="btn auth-claim-admin"
+            style={{
+              width: '100%',
+              marginBottom: '1rem',
+              background: 'linear-gradient(135deg, #FFD700, #FF8C00)',
+              color: '#000',
+              fontWeight: 'bold',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '0.75rem'
+            }}
+            onClick={onClaimAdmin}
+            disabled={busy}
+          >
+            👑 Claim Admin Account (One-Time Setup)
+          </button>
+        )}
         <button type="button" className="btn auth-google" onClick={google} disabled={busy || !isFirebaseConfigured}>Continue with Google</button>
         <div className="auth-divider"><span>or use email</span></div>
         <form onSubmit={submit}>
@@ -1151,6 +1172,74 @@ export default function App() {
   const [userPlaylists, setUserPlaylists] = useState([]);
   const [libraryHydrated, setLibraryHydrated] = useState(false);
 
+  /* Admin & Billing states */
+  const [hasAdmin, setHasAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminStats, setAdminStats] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${apiBase}/admin/check`)
+      .then((res) => res.json())
+      .then((data) => setHasAdmin(Boolean(data?.hasAdmin)))
+      .catch(() => setHasAdmin(true));
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setIsAdmin(false);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await authenticatedJsonRequest(`${apiBase}/admin/me`);
+        const data = await res.json();
+        setIsAdmin(Boolean(data?.isAdmin));
+      } catch {
+        setIsAdmin(false);
+      }
+    })();
+  }, [authUser]);
+
+  const handleClaimAdmin = async () => {
+    try {
+      const res = await authenticatedJsonRequest(`${apiBase}/admin/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authUser?.email || 'admin@sonara.app' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Unable to claim admin account.');
+      setHasAdmin(true);
+      setIsAdmin(true);
+      setNotice('👑 Admin Account claimed! Accessing Admin Billing dashboard...');
+      setView('admin');
+      setAuthOpen(false);
+    } catch (err) {
+      setNotice(err.message || 'Failed to claim admin account.');
+    }
+  };
+
+  const loadAdminStats = useCallback(async () => {
+    setAdminLoading(true);
+    try {
+      const res = await authenticatedJsonRequest(`${apiBase}/admin/stats`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Unable to load admin stats.');
+      setAdminStats(data);
+    } catch (err) {
+      setNotice(err.message || 'Failed to load billing metrics.');
+    } finally {
+      setAdminLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'admin' && isAdmin) {
+      loadAdminStats();
+    }
+  }, [view, isAdmin, loadAdminStats]);
+
   const handleAuthSuccess = useCallback((user) => {
     setAuthUser(user);
     setAuthOpen(false);
@@ -1387,13 +1476,35 @@ export default function App() {
     return [...sessionUploads, ...catalogTracks].filter((track) => (seen.has(track.id) ? false : seen.add(track.id))).slice(0, 5);
   }, [sessionUploads, catalogTracks]);
 
+  const userUploadPlaylists = useMemo(() => {
+    const map = new Map();
+    for (const track of catalogTracks) {
+      if (track.uploadedByName || track.uploadedByEmail || track.source === 'upload') {
+        const uploaderName = track.uploadedByName || (track.uploadedByEmail ? track.uploadedByEmail.split('@')[0] : 'Community');
+        const id = `user-upload-${uploaderName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        if (!map.has(id)) {
+          map.set(id, {
+            id,
+            name: `${uploaderName}'s Uploads`,
+            description: `Cloud music uploaded by ${uploaderName}`,
+            trackIds: [],
+            tracks: []
+          });
+        }
+        map.get(id).tracks.push(track);
+        map.get(id).trackIds.push(track.id);
+      }
+    }
+    return Array.from(map.values());
+  }, [catalogTracks]);
+
   const playlists = useMemo(
     () =>
-      [...defaultPlaylists, ...userPlaylists.filter((playlist) => playlist.id !== 'uploads')].map((playlist) => ({
+      [...defaultPlaylists, ...userUploadPlaylists, ...userPlaylists.filter((playlist) => playlist.id !== 'uploads')].map((playlist) => ({
         ...playlist,
-        tracks: playlist.dynamic === 'uploads' ? catalogTracks : playlist.trackIds.map((id) => trackById.get(id)).filter(Boolean)
+        tracks: playlist.tracks || (playlist.dynamic === 'uploads' ? catalogTracks : playlist.trackIds?.map((id) => trackById.get(id)).filter(Boolean) || [])
       })),
-    [catalogTracks, trackById, userPlaylists]
+    [catalogTracks, trackById, userPlaylists, userUploadPlaylists]
   );
   const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0];
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
@@ -2402,13 +2513,144 @@ export default function App() {
     </>
   );
 
+  const renderAdminBilling = () => {
+    if (!isAdmin) {
+      return (
+        <div className="info-box" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3>Access Restricted</h3>
+          <p className="muted-text">Admin privileges are required to view Cloudflare R2 storage billing & metrics.</p>
+        </div>
+      );
+    }
+
+    if (adminLoading || !adminStats) {
+      return (
+        <div className="info-box" style={{ padding: '2rem', textAlign: 'center' }}>
+          <h3>Loading Cloudflare R2 Storage Metrics...</h3>
+        </div>
+      );
+    }
+
+    const { summary, userBreakdown } = adminStats;
+    const freeTierGB = summary?.r2FreeTierGB || 10;
+    const totalGB = summary?.totalStorageGB || 0;
+    const usagePercent = Math.min(100, Math.round((totalGB / freeTierGB) * 100));
+
+    return (
+      <div className="admin-dashboard">
+        <div className="info-box" style={{ marginBottom: '1.5rem', background: 'var(--paper)', borderRadius: '16px', padding: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 'bold' }}>👑 Cloudflare R2 Storage & Cost Calculator</h2>
+              <p className="muted-text" style={{ margin: '0.25rem 0 0', fontSize: '0.88rem' }}>
+                Per-user storage usage & cost breakdown when R2 bucket exceeds 10 GB free limit ($0.015 / GB).
+              </p>
+            </div>
+            <button type="button" className="btn btn-sm" onClick={loadAdminStats}>
+              Refresh Metrics
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>TOTAL STORAGE USED</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', margin: '0.25rem 0' }}>
+                {summary.totalStorageMB} MB <small style={{ fontSize: '0.9rem', opacity: 0.8 }}>({summary.totalStorageGB} GB)</small>
+              </div>
+              <span style={{ fontSize: '0.8rem', color: usagePercent > 80 ? '#ffa726' : 'inherit' }}>
+                {usagePercent}% of 10 GB Free Tier
+              </span>
+            </div>
+
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>BILLABLE OVERAGE</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', margin: '0.25rem 0' }}>
+                {summary.billableGB} GB
+              </div>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>$0.015 / GB per month</span>
+            </div>
+
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>ESTIMATED MONTHLY COST</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: 'var(--accent, #e53935)', margin: '0.25rem 0' }}>
+                ${summary.totalEstimatedMonthlyCostUSD.toFixed(2)} / mo
+              </div>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>Zero bandwidth egress cost</span>
+            </div>
+
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '12px' }}>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>ACTIVE UPLOADERS</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', margin: '0.25rem 0' }}>
+                {summary.totalUsers} <small style={{ fontSize: '0.9rem', opacity: 0.8 }}>users</small>
+              </div>
+              <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>{summary.totalTracks} uploaded tracks</span>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+              <span>Cloudflare R2 Free Bucket Capacity</span>
+              <strong>{summary.totalStorageGB} GB / 10.0 GB</strong>
+            </div>
+            <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${usagePercent}%`,
+                  height: '100%',
+                  background: usagePercent > 90 ? '#ff5252' : usagePercent > 70 ? '#ffa726' : '#00e676',
+                  transition: 'width 0.3s ease'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="info-box" style={{ background: 'var(--paper)', borderRadius: '16px', padding: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 1rem', fontSize: '1.2rem' }}>User Storage & Cost Breakdown</h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', opacity: 0.7 }}>
+                  <th style={{ padding: '0.75rem' }}>User / Email</th>
+                  <th style={{ padding: '0.75rem' }}>Tracks</th>
+                  <th style={{ padding: '0.75rem' }}>Storage Used</th>
+                  <th style={{ padding: '0.75rem' }}>Bucket Share</th>
+                  <th style={{ padding: '0.75rem' }}>Est. Monthly Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(userBreakdown || []).map((u) => (
+                  <tr key={u.userKey} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <td style={{ padding: '0.75rem' }}>
+                      <strong>{u.displayName}</strong>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{u.email}</div>
+                    </td>
+                    <td style={{ padding: '0.75rem' }}>{u.trackCount}</td>
+                    <td style={{ padding: '0.75rem' }}>
+                      <strong>{u.totalMB} MB</strong> ({u.totalGB} GB)
+                    </td>
+                    <td style={{ padding: '0.75rem' }}>{u.sharePercentage}%</td>
+                    <td style={{ padding: '0.75rem', fontWeight: 'bold', color: 'var(--accent, #e53935)' }}>
+                      ${u.estimatedMonthlyCostUSD.toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const pageContent = {
     'all-music': renderAllMusic,
     library: renderLibrary,
     playlists: renderPlaylists,
     favorites: renderFavorites,
     upload: renderUpload,
-    lab: renderLab
+    lab: renderLab,
+    admin: renderAdminBilling
   };
 
   const subtitle = view === 'all-music' ? (query ? `${plural(visibleTracks.length, 'result')} for “${query}”` : plural(allTracks.length, 'track')) : pageMeta[view]?.subtitle;
@@ -2461,6 +2703,11 @@ export default function App() {
                 {item.label}
               </button>
             ))}
+          {isAdmin && (
+            <button type="button" className={`mnav ${view === 'admin' ? 'is-active' : ''}`} style={{ color: '#FFD700', fontWeight: 'bold' }} onClick={() => goTo('admin')}>
+              👑 Admin Billing
+            </button>
+          )}
         </nav>
 
         <div className="masthead-tools">
@@ -2611,6 +2858,8 @@ export default function App() {
         <AuthDialog
           mode={authMode}
           reason={authReason}
+          hasAdmin={hasAdmin}
+          onClaimAdmin={handleClaimAdmin}
           onClose={() => setAuthOpen(false)}
           onSignedIn={handleAuthSuccess}
           onModeChange={setAuthMode}

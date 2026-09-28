@@ -22,8 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,22 +42,23 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            LiquidTheme(themeViewModel) {
+            val systemDark = isSystemInDarkTheme()
+            val isDark = themeViewModel.isDark(systemDark)
+            val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+
+            MaterialTheme {
                 var showSplash by remember { mutableStateOf(true) }
-                
+
                 if (showSplash) {
                     SplashView(themeViewModel) {
                         showSplash = false
                     }
                 } else {
                     PermissionWrapper(viewModel, themeViewModel) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            // Ambient background
-                            AmbientBackground(themeViewModel)
-                            
+                        Box(modifier = Modifier.fillMaxSize().background(bg)) {
                             // Main navigation
-                            MainNavigation(viewModel, themeViewModel)
-                            
+                            MainNavigation(viewModel, themeViewModel, systemDark)
+
                             // Full player overlay
                             AnimatedVisibility(
                                 visible = viewModel.showFullPlayer,
@@ -72,7 +71,7 @@ class MainActivity : ComponentActivity() {
                                     animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
                                 ) + fadeOut()
                             ) {
-                                LiquidPlayer(viewModel, themeViewModel)
+                                LiquidPlayer(viewModel, themeViewModel, systemDark)
                             }
                         }
                     }
@@ -89,7 +88,7 @@ fun PermissionWrapper(
     content: @Composable () -> Unit
 ) {
     var permissionStatus by remember { mutableStateOf<Boolean?>(null) }
-    
+
     val permissions = remember {
         mutableListOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -111,8 +110,8 @@ fun PermissionWrapper(
 
     LaunchedEffect(Unit) {
         val allGranted = permissions.all {
-            ContextCompat.checkSelfPermission(viewModel.getApplication(), it) == 
-            PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(viewModel.getApplication(), it) ==
+                    PackageManager.PERMISSION_GRANTED
         }
         if (allGranted) {
             permissionStatus = true
@@ -155,24 +154,7 @@ fun PermissionScreen(themeViewModel: ThemeViewModel, onGrant: () -> Unit) {
 }
 
 @Composable
-fun AmbientBackground(themeViewModel: ThemeViewModel) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(themeViewModel.primary.copy(alpha = 0.06f), Color.Transparent),
-                    center = Offset(size.width * 0.7f, size.height * 0.2f),
-                    radius = size.maxDimension * 0.7f
-                ),
-                center = Offset(size.width * 0.7f, size.height * 0.2f),
-                radius = size.maxDimension * 0.7f
-            )
-        }
-    }
-}
-
-@Composable
-fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel) {
+fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, systemDark: Boolean) {
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showAddToPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf<Track?>(null) }
@@ -192,7 +174,7 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel) {
             OutlinedTextField(
                 value = playlistName,
                 onValueChange = { playlistName = it },
-                placeholder = { Text("Name your vibe...", color = Color.White.copy(alpha = 0.3f)) },
+                placeholder = { Text("Name your playlist...", color = Color.White.copy(alpha = 0.3f)) },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -217,41 +199,41 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel) {
     }
 
     // Song Options Bottom Sheet
-    if (showAddToPlaylistDialog != null) {
-        val track = showAddToPlaylistDialog!!
+    val currentTrackOptions = showAddToPlaylistDialog
+    if (currentTrackOptions != null) {
         SongOptionsSheet(
-            track = track,
+            track = currentTrackOptions,
             viewModel = viewModel,
             themeViewModel = themeViewModel,
             onDismiss = { showAddToPlaylistDialog = null },
             onAddToPlaylist = { playlistName ->
-                viewModel.addTrackToPlaylist(track.id, playlistName)
+                viewModel.addTrackToPlaylist(currentTrackOptions.id, playlistName)
                 showAddToPlaylistDialog = null
             },
             onCreateNewPlaylist = { name ->
                 viewModel.createPlaylist(name)
-                viewModel.addTrackToPlaylist(track.id, name)
+                viewModel.addTrackToPlaylist(currentTrackOptions.id, name)
                 showAddToPlaylistDialog = null
             },
             onDelete = {
-                showDeleteConfirmDialog = track
+                showDeleteConfirmDialog = currentTrackOptions
                 showAddToPlaylistDialog = null
             }
         )
     }
 
     // Delete confirmation dialog
-    if (showDeleteConfirmDialog != null) {
-        val track = showDeleteConfirmDialog!!
+    val currentDeleteConfirm = showDeleteConfirmDialog
+    if (currentDeleteConfirm != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = null },
             containerColor = Color(0xFF1A1A1E),
             title = { Text("Delete Song", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete \"${track.title}\"?", color = Color.White.copy(alpha = 0.7f)) },
+            text = { Text("Are you sure you want to delete \"${currentDeleteConfirm.title}\"?", color = Color.White.copy(alpha = 0.7f)) },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteTrack(track)
+                        viewModel.deleteTrack(currentDeleteConfirm)
                         showDeleteConfirmDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
@@ -269,38 +251,34 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel) {
 
     Scaffold(
         bottomBar = {
-            LiquidNavigation(viewModel, themeViewModel) {}
+            LiquidNavigation(viewModel, themeViewModel, systemDark)
         },
         containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            AnimatedContent(
-                targetState = Pair(viewModel.currentFolder != null, viewModel.selectedTab),
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
-                },
-                label = "MainFlow"
-            ) { (isDetail, tab) ->
-                if (isDetail) {
-                    LiquidFolderDetail(
-                        viewModel = viewModel,
-                        themeViewModel = themeViewModel,
-                        onShowOptions = { showAddToPlaylistDialog = it },
-                        onBack = {
-                            viewModel.currentFolder = null
-                            viewModel.selectedTab = previousTab
-                        }
-                    )
-                } else {
-                    LaunchedEffect(tab) {
-                        previousTab = tab
+            val isDetail = viewModel.currentFolder != null
+            val tab = viewModel.selectedTab
+
+            if (isDetail) {
+                LiquidFolderDetail(
+                    viewModel = viewModel,
+                    themeViewModel = themeViewModel,
+                    systemDark = systemDark,
+                    onShowOptions = { showAddToPlaylistDialog = it },
+                    onBack = {
+                        viewModel.currentFolder = null
+                        viewModel.selectedTab = previousTab
                     }
-                    when (tab) {
-                        0 -> LiquidHome(viewModel, themeViewModel) { viewModel.currentFolder = it }
-                        1 -> LiquidLibrary(viewModel, themeViewModel, { showCreatePlaylistDialog = true }) { viewModel.currentFolder = it }
-                        2 -> LiquidAllMusic(viewModel, themeViewModel, { showAddToPlaylistDialog = it }) { track, list -> viewModel.playTrack(track, list) }
-                        3 -> LiquidLab(themeViewModel) {}
-                    }
+                )
+            } else {
+                LaunchedEffect(tab) {
+                    previousTab = tab
+                }
+                when (tab) {
+                    0 -> LiquidHome(viewModel, themeViewModel, systemDark) { viewModel.currentFolder = it }
+                    1 -> LiquidLibrary(viewModel, themeViewModel, systemDark, { showCreatePlaylistDialog = true }) { viewModel.currentFolder = it }
+                    2 -> LiquidAllMusic(viewModel, themeViewModel, systemDark, { showAddToPlaylistDialog = it }) { track, list -> viewModel.playTrack(track, list) }
+                    3 -> LiquidLab(viewModel, themeViewModel, systemDark)
                 }
             }
 
@@ -373,10 +351,7 @@ fun SongOptionsSheet(
                 }
             }
 
-            Divider(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                color = Color.White.copy(alpha = 0.06f)
-            )
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 24.dp).background(Color.White.copy(alpha = 0.06f)))
 
             // Add to Playlist section
             Text(
@@ -414,7 +389,8 @@ fun SongOptionsSheet(
             }
 
             // Existing playlists
-            viewModel.userPlaylists.filter { it.name != "Favorites" }.take(5).forEach { playlist ->
+            val playlistsToDisplay: List<Folder> = viewModel.userPlaylists.filter { it.name != "Favorites" }.take(5)
+            for (playlist in playlistsToDisplay) {
                 Surface(
                     onClick = { onAddToPlaylist(playlist.name) },
                     modifier = Modifier
@@ -444,10 +420,7 @@ fun SongOptionsSheet(
                 }
             }
 
-            Divider(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                color = Color.White.copy(alpha = 0.06f)
-            )
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 24.dp).background(Color.White.copy(alpha = 0.06f)))
 
             // Delete option
             Surface(
@@ -504,8 +477,6 @@ fun SongOptionsSheet(
             confirmButton = {
                 Button(
                     onClick = {
-                        // Get name from text field - need to restructure
-                        // For now, just dismiss
                         showCreateNew = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = themeViewModel.primary)

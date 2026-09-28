@@ -275,12 +275,6 @@ fun PresetButton(
     }
 }
 
-/**
- * STABLE EQ Slider - Fixed version that doesn't fight with parent state
- * 
- * Key fix: Uses internal dragging state that only syncs to parent on drag end,
- * preventing infinite recomposition loops.
- */
 @Composable
 fun StableEqSlider(
     label: String,
@@ -291,18 +285,15 @@ fun StableEqSlider(
     tint: Color,
     enabled: Boolean
 ) {
-    // Internal dragging value - only used during active drag
     var dragValue by remember { mutableFloatStateOf(value) }
     var isDragging by remember { mutableStateOf(false) }
     
-    // Sync from parent only when NOT dragging
     LaunchedEffect(value) {
         if (!isDragging) {
             dragValue = value
         }
     }
     
-    // The displayed value: use dragValue during drag, otherwise use parent value
     val displayValue = if (isDragging) dragValue else value
     
     Column(
@@ -326,11 +317,11 @@ fun StableEqSlider(
                     detectVerticalDragGestures(
                         onDragStart = {
                             isDragging = true
-                            dragValue = value // Start from current parent value
+                            dragValue = value
                         },
                         onDragEnd = {
                             isDragging = false
-                            onValueChange(dragValue) // Commit final value
+                            onValueChange(dragValue)
                         },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
@@ -345,7 +336,6 @@ fun StableEqSlider(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Track background
             Box(
                 modifier = Modifier
                     .width(6.dp)
@@ -353,10 +343,8 @@ fun StableEqSlider(
                     .background(Color(0xFF2A2A2E), RoundedCornerShape(3.dp))
             )
             
-            // Normalized value (0.0 at min, 1.0 at max)
             val normalized = (displayValue - min) / (max - min)
             
-            // Active track - fills from bottom up to thumb position
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -370,7 +358,6 @@ fun StableEqSlider(
                     )
             )
 
-            // Center line indicator (0dB)
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -379,7 +366,6 @@ fun StableEqSlider(
                     .background(Color.White.copy(alpha = 0.3f))
             )
 
-            // Thumb
             val thumbY = (1f - normalized)
             Box(
                 modifier = Modifier
@@ -466,14 +452,12 @@ fun LiquidSleepTimer(
 
                 Spacer(Modifier.height(24.dp))
 
-                // Circular dial with drag interaction
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(320.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Interactive circular dial
                     Box(
                         modifier = Modifier.size(280.dp),
                         contentAlignment = Alignment.Center
@@ -509,14 +493,12 @@ fun LiquidSleepTimer(
                             val radius = size.width * 0.42f
                             val trackWidth = 12f
 
-                            // Background track
                             drawCircle(
                                 color = Color(0xFF1A1A1E),
                                 radius = radius,
                                 style = Stroke(width = trackWidth, cap = StrokeCap.Round)
                             )
 
-                            // Tick marks
                             for (i in 0 until 12) {
                                 val tickAngle = (i * 30f - 90f) * (PI / 180f).toFloat()
                                 val innerR = radius - 20f
@@ -530,7 +512,6 @@ fun LiquidSleepTimer(
                                 )
                             }
 
-                            // Active arc
                             val sweepAngle = (selectedSeconds.toFloat() / 7200f) * 360f
                             if (sweepAngle > 0f) {
                                 drawArc(
@@ -548,7 +529,6 @@ fun LiquidSleepTimer(
                                 )
                             }
 
-                            // Thumb dot
                             val thumbAngle = (-90f + sweepAngle) * (PI / 180f).toFloat()
                             drawCircle(
                                 color = themeViewModel.primary,
@@ -558,7 +538,6 @@ fun LiquidSleepTimer(
                                     center.y + sin(thumbAngle) * radius
                                 )
                             )
-                            // Thumb glow
                             drawCircle(
                                 color = themeViewModel.primary.copy(alpha = 0.3f),
                                 radius = 18f,
@@ -569,13 +548,12 @@ fun LiquidSleepTimer(
                             )
                         }
 
-                        // MM:SS countdown display in center
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             if (isTimerRunning) {
                                 val minutes = (displayTimeLeft / 1000) / 60
                                 val seconds = (displayTimeLeft / 1000) % 60
                                 Text(
-                                    "%02d:%02d".format(minutes, seconds),
+                                    String.format("%02d:%02d", minutes, seconds),
                                     style = MaterialTheme.typography.displayLarge,
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
@@ -590,7 +568,7 @@ fun LiquidSleepTimer(
                                 val minutes = selectedSeconds / 60
                                 val seconds = selectedSeconds % 60
                                 Text(
-                                    "%02d:%02d".format(minutes, seconds),
+                                    String.format("%02d:%02d", minutes, seconds),
                                     style = MaterialTheme.typography.displayLarge,
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
@@ -604,7 +582,6 @@ fun LiquidSleepTimer(
                             }
                         }
 
-                        // Min/Max labels
                         Text(
                             "0",
                             color = Color.White.copy(alpha = 0.3f),
@@ -622,7 +599,6 @@ fun LiquidSleepTimer(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Quick time buttons - 2x3 grid
                 if (!isTimerRunning) {
                     Column(
                         modifier = Modifier
@@ -758,11 +734,4 @@ fun LiquidDialog(
         titleContentColor = Color.White,
         shape = RoundedCornerShape(24.dp)
     )
-}
-
-fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
 }

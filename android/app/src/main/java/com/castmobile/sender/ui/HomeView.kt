@@ -1,9 +1,11 @@
 package com.sonara.app.ui
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,598 +14,1007 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.sonara.app.model.Folder
 import com.sonara.app.model.Track
 import java.util.Calendar
-import kotlin.math.*
 
 @Composable
 fun LiquidHome(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
+    systemDark: Boolean,
     onFolderClick: (Folder) -> Unit
 ) {
-    val calendar = Calendar.getInstance()
-    val hour = calendar.get(Calendar.HOUR_OF_DAY)
-    val timeGreeting = when (hour) {
-        in 5..11 -> "Good Morning"
-        in 12..16 -> "Good Afternoon"
-        else -> "Good Evening"
-    }
+    var showAuthDialog by remember { mutableStateOf(false) }
 
-    val greetings = remember {
-        listOf(
-            "$timeGreeting",
-            "Welcome back",
-            "Ready for music?",
-            "What's the mood?",
-            "Pick your vibe",
-            "Sonara is ready",
-            "Let's hear it",
-            "Music for you",
-            "Your studio awaits",
-            "Dive into sound",
-            "How you doing",
-            "Feel the vibe"
+    if (showAuthDialog) {
+        SonaraAuthDialog(
+            viewModel = viewModel,
+            themeViewModel = themeViewModel,
+            systemDark = systemDark,
+            onDismiss = { showAuthDialog = false }
         )
     }
-    val randomGreeting = remember { greetings.random() }
 
-    val isDjActive = viewModel.isDjMode
+    if (viewModel.isOnlineMode) {
+        if (viewModel.isOnlineLoading) {
+            // Full screen loading transition when switching to online
+            OnlineTransitionScreen(
+                themeViewModel = themeViewModel,
+                systemDark = systemDark
+            )
+        } else {
+            // Dedicated Online UI (web mobile experience, no offline media mixed in)
+            OnlineHomeView(
+                viewModel = viewModel,
+                themeViewModel = themeViewModel,
+                systemDark = systemDark,
+                onOpenAuth = { showAuthDialog = true },
+                onFolderClick = onFolderClick
+            )
+        }
+    } else {
+        // Dedicated Offline Local Studio UI
+        OfflineHomeView(
+            viewModel = viewModel,
+            themeViewModel = themeViewModel,
+            systemDark = systemDark,
+            onFolderClick = onFolderClick
+        )
+    }
+}
 
-    val infiniteTransition = rememberInfiniteTransition(label = "home")
+@Composable
+private fun OnlineTransitionScreen(
+    themeViewModel: ThemeViewModel,
+    systemDark: Boolean
+) {
+    val isDark = themeViewModel.isDark(systemDark)
+    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+    val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
+    val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
+    val accent = themeViewModel.getAccentColor(isDark)
 
-    val djPulse by infiniteTransition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(1800), RepeatMode.Reverse),
-        label = "djPulse"
-    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bg),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(44.dp),
+                    color = accent,
+                    strokeWidth = 3.dp
+                )
+            }
 
-    val wavePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            if (isDjActive) tween(1800, easing = LinearEasing) else tween(3500, easing = LinearEasing)
-        ),
-        label = "wavePhase"
-    )
+            Spacer(Modifier.height(24.dp))
 
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = if (isDjActive) 0.6f else 0.35f,
-        targetValue = if (isDjActive) 0.9f else 0.5f,
-        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-        label = "glowAlpha"
-    )
+            Text(
+                text = "SONARA CLOUD",
+                color = text,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp
+            )
 
-    val sparklePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(600, easing = LinearEasing)),
-        label = "sparkle"
-    )
+            Spacer(Modifier.height(8.dp))
 
-    val bassIntensity = viewModel.bassIntensity
-    val midIntensity = viewModel.midIntensity
-    val trebleIntensity = viewModel.trebleIntensity
+            Text(
+                text = "Connecting to live cloud studio...",
+                color = muted,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
-    val soundscapes = remember(viewModel.userPlaylists, viewModel.folders) {
-        (viewModel.userPlaylists + viewModel.folders).distinctBy { it.name }
+@Composable
+private fun OnlineHomeView(
+    viewModel: MainViewModel,
+    themeViewModel: ThemeViewModel,
+    systemDark: Boolean,
+    onOpenAuth: () -> Unit,
+    onFolderClick: (Folder) -> Unit
+) {
+    val isDark = themeViewModel.isDark(systemDark)
+    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+    val paper = if (isDark) SonaraDesign.DarkPaper else SonaraDesign.LightPaper
+    val line = if (isDark) SonaraDesign.DarkLine else SonaraDesign.LightLine
+    val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
+    val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
+    val accent = themeViewModel.getAccentColor(isDark)
+
+    var searchQuery by remember { mutableStateOf("") }
+    val onlineTracks = viewModel.remoteTracks.ifEmpty { viewModel.allTracks }
+    val filteredTracks = if (searchQuery.isBlank()) onlineTracks else onlineTracks.filter {
+        it.title.contains(searchQuery, ignoreCase = true) ||
+        it.artist.contains(searchQuery, ignoreCase = true) ||
+        it.album.contains(searchQuery, ignoreCase = true)
     }
 
-    val cardIcons = listOf("☁️", "💪", "🧘", "🌍", "🎷", "🍃", "🌙", "🚗")
+    val current = viewModel.currentTrack
+    val isPlaying = viewModel.isPlaying
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bg),
         contentPadding = PaddingValues(bottom = 180.dp)
     ) {
+        // ─── Online Header Bar ────────────────────────────────────────
         item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(top = 50.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 48.dp, bottom = 16.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "$randomGreeting, ${themeViewModel.userName}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = themeViewModel.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Text(
-                    buildAnnotatedString {
-                        append("What do you\nwant ")
-                        withStyle(SpanStyle(brush = Brush.linearGradient(listOf(themeViewModel.primary, themeViewModel.secondary)))) {
-                            append("to hear?")
-                        }
-                    },
-                    style = MaterialTheme.typography.displayMedium,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White,
-                    lineHeight = 48.sp
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                Text(
-                    "Let Sonara set the vibe",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.5f)
-                )
-            }
-        }
-
-        // DJ Button section - centerpiece
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                // Outer reactive glow
-                Canvas(modifier = Modifier.size(260.dp)) {
-                    val center = Offset(size.width / 2, size.height / 2)
-                    val baseGlow = if (isDjActive) 130f else 110f
-                    val bassExpansion = if (isDjActive) bassIntensity * 30f else 0f
-                    val glowRadius = baseGlow + bassExpansion
-
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                themeViewModel.primary.copy(alpha = glowAlpha * (0.7f + midIntensity * 0.3f)),
-                                themeViewModel.secondary.copy(alpha = glowAlpha * 0.4f),
-                                Color.Transparent
-                            ),
-                            center = center,
-                            radius = glowRadius
-                        ),
-                        center = center,
-                        radius = glowRadius
-                    )
-
-                    // Treble sparkle dots
-                    if (isDjActive && trebleIntensity > 0.3f) {
-                        for (i in 0 until 12) {
-                            val sparkleAngle = (i.toFloat() / 12 * 360f + sparklePhase) * (PI / 180f).toFloat()
-                            val sparkleR = 100f + trebleIntensity * 18f
-                            val sparkleX = center.x + cos(sparkleAngle) * sparkleR
-                            val sparkleY = center.y + sin(sparkleAngle) * sparkleR
-
-                            drawCircle(
-                                color = Color.White.copy(alpha = trebleIntensity * 0.7f),
-                                radius = 2f + trebleIntensity * 3f,
-                                center = Offset(sparkleX, sparkleY)
-                            )
-                        }
-                    }
-                }
-
-                // Rings and waveform
-                Canvas(modifier = Modifier.size(220.dp)) {
-                    val center = Offset(size.width / 2, size.height / 2)
-                    val ringAlpha = if (isDjActive) 0.7f + midIntensity * 0.3f else 0.7f
-
-                    // Multiple concentric rings for depth
-                    for (r in listOf(80f, 100f, 120f)) {
-                        drawCircle(
-                            color = themeViewModel.primary.copy(alpha = ringAlpha * (0.4f - (r-80f)/200f)),
-                            radius = r,
-                            style = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round)
-                        )
-                    }
-
-                    // Main outer ring - primary color
-                    drawCircle(
-                        color = themeViewModel.primary.copy(alpha = ringAlpha),
-                        radius = 100f,
-                        style = Stroke(width = if (isDjActive) 4f else 3.5f, cap = StrokeCap.Round)
-                    )
-
-                    // Inner ring - secondary color
-                    drawCircle(
-                        color = themeViewModel.secondary.copy(alpha = ringAlpha * 0.85f),
-                        radius = 82f,
-                        style = Stroke(width = if (isDjActive) 3f else 2.5f, cap = StrokeCap.Round)
-                    )
-
-                    // Spinning waveform lines
-                    val lineCount = if (isDjActive) 24 else 18
-                    for (i in 0 until lineCount) {
-                        val angle = (i.toFloat() / lineCount * 360f + wavePhase) * (PI / 180f).toFloat()
-                        val innerR = if (isDjActive) 22f else 24f
-                        val bassBoost = if (isDjActive) bassIntensity * 12f else 0f
-                        val outerR = (if (isDjActive) 48f else 50f) + sin(angle * 3) * (10f + bassBoost)
-
-                        val lineAlpha = if (isDjActive) 0.7f + midIntensity * 0.3f else 0.6f
-                        val lineWidth = if (isDjActive) 3f + bassIntensity * 1.5f else 3f
-
-                        drawLine(
-                            color = Color.White.copy(alpha = lineAlpha),
-                            start = Offset(center.x + cos(angle) * innerR, center.y + sin(angle) * innerR),
-                            end = Offset(center.x + cos(angle) * outerR, center.y + sin(angle) * outerR),
-                            strokeWidth = lineWidth,
-                            cap = StrokeCap.Round
-                        )
-                    }
-
-                    // Spinning dot
-                    if (isDjActive) {
-                        val dotAngle = wavePhase * 2 * (PI / 180f).toFloat()
-                        val dotR = 70f
-                        drawCircle(
-                            color = themeViewModel.primary,
-                            radius = 5f,
-                            center = Offset(center.x + cos(dotAngle) * dotR, center.y + sin(dotAngle) * dotR)
-                        )
-                    }
-                }
-
-                // Center content
-                if (isDjActive) {
-                    Box(
-                        modifier = Modifier.size(100.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.GraphicEq,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
-                } else {
-                    Surface(
-                        onClick = { viewModel.startDJ() },
-                        modifier = Modifier.scale(djPulse),
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.6f),
-                        border = BorderStroke(2.dp, themeViewModel.primary.copy(alpha = 0.4f))
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(120.dp),
-                            contentAlignment = Alignment.Center
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E676))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "SONARA CLOUD",
+                            color = text,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // User Auth Chip
+                        Surface(
+                            onClick = onOpenAuth,
+                            shape = RoundedCornerShape(999.dp),
+                            color = paper,
+                            border = BorderStroke(1.dp, line)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
-                                    Icons.Default.GraphicEq,
+                                    imageVector = Icons.Default.Person,
                                     contentDescription = null,
-                                    tint = themeViewModel.primary,
-                                    modifier = Modifier.size(36.dp)
+                                    tint = accent,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "DJ",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White
+                                    text = viewModel.userEmail?.substringBefore('@') ?: "Sign In",
+                                    color = text,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Switch back to Offline Mode
+                        Surface(
+                            onClick = { viewModel.toggleOnlineMode(false) },
+                            shape = RoundedCornerShape(999.dp),
+                            color = paper,
+                            border = BorderStroke(1.dp, line)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudOff,
+                                    contentDescription = null,
+                                    tint = muted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "OFFLINE",
+                                    color = muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
                     }
                 }
 
-                // Status text - show current theme when DJ is active
-                if (isDjActive) {
-                    Text(
-                        viewModel.currentThemeName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = themeViewModel.primary.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = (-12).dp)
-                    )
-                }
-            }
+                Spacer(Modifier.height(16.dp))
 
-            if (!isDjActive) {
-                Text(
-                    "Tap to create a vibe",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(top = 8.dp),
-                    textAlign = TextAlign.Center
+                // Search Bar in Online Mode
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search cloud music catalog...", color = muted, fontSize = 14.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = muted) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = muted)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = paper,
+                        unfocusedContainerColor = paper,
+                        focusedBorderColor = accent,
+                        unfocusedBorderColor = line
+                    ),
+                    singleLine = true
                 )
             }
         }
-    }
 
-    // Recently Played Section
-    val recentTracks = viewModel.recentlyPlayedTracks
-    if (recentTracks.isNotEmpty()) {
-        item {
-            Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Recently Played",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            "See all",
-                            color = themeViewModel.primary,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { viewModel.selectedTab = 2 }
-                        )
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
-                    
-                    recentTracks.take(2).forEach { track ->
-                        RecentlyPlayedItem(track, viewModel, themeViewModel)
-                        Spacer(Modifier.height(12.dp))
-                    }
-                }
-            }
-        }
-
-        // Soundscapes section header
-        item {
-            Column(modifier = Modifier.padding(top = 4.dp)) {
-                Row(
+        // ─── Online Error State or Cloud Catalog ──────────────────────
+        val onlineErr = viewModel.onlineError
+        if (onlineErr != null && onlineTracks.isEmpty()) {
+            item {
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = paper,
+                    border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f))
                 ) {
-                    Column {
-                        Text(
-                            "Soundscapes",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            "Curated vibes for your mood",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.4f)
-                        )
-                    }
-                    Text(
-                        "See all",
-                        color = themeViewModel.primary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable { viewModel.selectedTab = 1 }
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-            }
-        }
-
-        item {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                val items = soundscapes.take(8)
-
-                if (items.size >= 2) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SoundscapeCard(items[0], cardIcons[0], Modifier.weight(1f), themeViewModel) { onFolderClick(items[0]) }
-                        SoundscapeCard(items[1], cardIcons[1], Modifier.weight(1f), themeViewModel) { onFolderClick(items[1]) }
-                    }
-                }
-                if (items.size >= 4) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SoundscapeCard(items[2], cardIcons[2], Modifier.weight(1f), themeViewModel) { onFolderClick(items[2]) }
-                        SoundscapeCard(items[3], cardIcons[3], Modifier.weight(1f), themeViewModel) { onFolderClick(items[3]) }
-                    }
-                }
-                if (items.size >= 6) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SoundscapeCard(items[4], cardIcons[4], Modifier.weight(1f), themeViewModel) { onFolderClick(items[4]) }
-                        SoundscapeCard(items[5], cardIcons[5], Modifier.weight(1f), themeViewModel) { onFolderClick(items[5]) }
-                    }
-                }
-                if (items.size >= 8) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SoundscapeCard(items[6], cardIcons[6], Modifier.weight(1f), themeViewModel) { onFolderClick(items[6]) }
-                        SoundscapeCard(items[7], cardIcons[7], Modifier.weight(1f), themeViewModel) { onFolderClick(items[7]) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun RecentlyPlayedItem(track: Track, viewModel: MainViewModel, themeViewModel: ThemeViewModel) {
-    Surface(
-        onClick = { viewModel.playTrack(track, listOf(track)) },
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1A1A1E),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AsyncImage(
-                model = track.albumArtUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop
-            )
-            
-            Spacer(Modifier.width(16.dp))
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    track.title,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    track.artist,
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = "Play",
-                    tint = themeViewModel.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SoundscapeCard(
-    folder: Folder,
-    iconEmoji: String = "🎵",
-    modifier: Modifier = Modifier,
-    themeViewModel: ThemeViewModel,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(140.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1A1A1E),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-    ) {
-        Box {
-            AsyncImage(
-                model = folder.coverArtUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(8.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                contentScale = ContentScale.Crop,
-                alpha = 0.6f
-            )
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.2f),
-                                Color.Black.copy(alpha = 0.85f)
-                            )
-                        )
-                    )
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.4f))
-                            .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(iconEmoji, fontSize = 18.sp)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(themeViewModel.primary.copy(alpha = 0.3f))
-                            .clickable { onClick() },
-                        contentAlignment = Alignment.Center
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = null,
+                            tint = Color(0xFFFF5252),
+                            modifier = Modifier.size(48.dp)
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = "Cloud Catalog Unreachable",
+                            color = text,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = onlineErr,
+                            color = muted,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(
+                                onClick = { viewModel.loadOnlineCatalog() },
+                                colors = ButtonDefaults.buttonColors(containerColor = accent),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Retry Connection", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.toggleOnlineMode(false) },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Switch to Offline", color = text)
+                            }
+                        }
                     }
                 }
-
-                Column {
+            }
+        } else {
+            // ─── Cloud Soundscapes / Folders ───────────────────────────
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 12.dp)
+                ) {
                     Text(
-                        folder.name,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "Cloud Playlists & Vibes",
+                        color = text,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.height(2.dp))
                     Text(
-                        "${folder.trackCount} tracks",
-                        color = Color.White.copy(alpha = 0.6f),
+                        text = "${onlineTracks.size} tracks available on Sonara Cloud",
+                        color = muted,
                         fontSize = 12.sp
                     )
                 }
             }
+
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(viewModel.folders) { folder ->
+                        Surface(
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(100.dp)
+                                .clickable { onFolderClick(folder) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = paper,
+                            border = BorderStroke(1.dp, line)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = folder.name,
+                                    color = text,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${folder.trackCount} tracks",
+                                    color = muted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ─── Cloud Catalog Song List ──────────────────────────────
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 24.dp, bottom = 12.dp)
+                ) {
+                    Text(
+                        text = "Cloud Catalog",
+                        color = text,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            itemsIndexed(filteredTracks) { index, track ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            viewModel.playFromList(filteredTracks, index, "Cloud Catalog")
+                        }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CoverArt(track = track, sizeDp = 44.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = track.title,
+                            color = if (current?.id == track.id) accent else text,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = track.artist,
+                            color = muted,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            if (current?.id == track.id) {
+                                viewModel.togglePlayback()
+                            } else {
+                                viewModel.playFromList(filteredTracks, index, "Cloud Catalog")
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying && current?.id == track.id) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun OfflineHomeView(
+    viewModel: MainViewModel,
+    themeViewModel: ThemeViewModel,
+    systemDark: Boolean,
+    onFolderClick: (Folder) -> Unit
+) {
+    val isDark = themeViewModel.isDark(systemDark)
+    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+    val paper = if (isDark) SonaraDesign.DarkPaper else SonaraDesign.LightPaper
+    val line = if (isDark) SonaraDesign.DarkLine else SonaraDesign.LightLine
+    val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
+    val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
+    val accent = themeViewModel.getAccentColor(isDark)
+
+    val calendar = Calendar.getInstance()
+    val hour = calendar.get(Calendar.HOUR_OF_DAY)
+    val timeGreeting = if (hour < 12) "Good morning" else if (hour < 18) "Good afternoon" else "Good evening"
+
+    val current = viewModel.currentTrack
+    val allTracks = viewModel.allTracks
+    val spotlightTrack = current ?: viewModel.recentlyPlayedTracks.firstOrNull() ?: allTracks.firstOrNull()
+    val isPlaying = viewModel.isPlaying
+
+    val soundscapes = remember(viewModel.userPlaylists, viewModel.folders) {
+        val list = mutableListOf<SoundscapeItem>()
+        val favs = viewModel.userPlaylists.find { it.name == "Favorites" }
+        list.add(SoundscapeItem("favorites", "Favorites", "Yours", favs?.tracks ?: emptyList()))
+        
+        for (folder in viewModel.userPlaylists) {
+            if (folder.name != "Favorites") {
+                list.add(SoundscapeItem(folder.name, folder.name, "Playlist", folder.tracks))
+            }
+        }
+        for (folder in viewModel.folders) {
+            if (list.none { it.id == folder.name }) {
+                list.add(SoundscapeItem(folder.name, folder.name, "Library", folder.tracks))
+            }
+        }
+        list
+    }
+
+    val recentTracks = if (viewModel.recentlyPlayedTracks.isNotEmpty()) viewModel.recentlyPlayedTracks else allTracks.take(6)
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bg),
+        contentPadding = PaddingValues(bottom = 180.dp)
+    ) {
+        // ─── Hero Header ──────────────────────────────────────────────
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 48.dp, bottom = 20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(accent)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "$timeGreeting, ${themeViewModel.userName}",
+                            color = muted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    // Online Mode Switch Button
+                    Surface(
+                        onClick = { viewModel.toggleOnlineMode(true) },
+                        shape = RoundedCornerShape(999.dp),
+                        color = paper,
+                        border = BorderStroke(1.dp, line)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Cloud,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "GO ONLINE",
+                                color = accent,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "SONARA",
+                        color = muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Set the tone for the next hour.",
+                        color = text,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                }
+            }
+        }
+
+        // ─── Feature Spotlight & Recently Played Grid ─────────────────
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Spotlight Feature Card
+                val spotlightTone = if (spotlightTrack != null) {
+                    val seed = SonaraDesign.hashString(spotlightTrack.id.toString())
+                    val index = ((seed ushr 3) and 0x7FFFFFFF) % SonaraDesign.SoundscapeTones.size
+                    SonaraDesign.SoundscapeTones[index]
+                } else SonaraDesign.SoundscapeTones[1]
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = spotlightTone.bg
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        SleeveStack(
+                            track = spotlightTrack,
+                            playing = isPlaying && current?.id == spotlightTrack?.id,
+                            spin = themeViewModel.spinRecords,
+                            onClick = { viewModel.showFullPlayer = true },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(Modifier.height(16.dp))
+
+                        if (spotlightTrack != null) {
+                            Text(
+                                text = if (isPlaying && current?.id == spotlightTrack.id) "NOW SPINNING" else "READY ON THE DECK",
+                                color = spotlightTone.fg.copy(alpha = 0.75f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp
+                            )
+                            Text(
+                                text = spotlightTrack.title,
+                                color = spotlightTone.fg,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = spotlightTrack.artist,
+                                color = spotlightTone.fg.copy(alpha = 0.8f),
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (spotlightTrack != null) {
+                                        if (current?.id == spotlightTrack.id) {
+                                            viewModel.togglePlayback()
+                                        } else {
+                                            val targetIdx = allTracks.indexOfFirst { it.id == spotlightTrack.id }
+                                            viewModel.playFromList(allTracks, if (targetIdx >= 0) targetIdx else 0, "All Music")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(spotlightTone.fg, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying && current?.id == spotlightTrack?.id) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = spotlightTone.bg,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            DjButton(
+                                active = viewModel.isDjMode,
+                                onClick = {
+                                    if (viewModel.isDjMode) viewModel.changeDJVibe() else viewModel.startDJ()
+                                },
+                                accentColor = accent
+                            )
+                        }
+                    }
+                }
+
+                // Recently Played Mini Card
+                if (recentTracks.isNotEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        color = paper,
+                        border = BorderStroke(1.dp, line)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "RECENTLY PLAYED",
+                                    color = muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp
+                                )
+                                Text(
+                                    text = "View all",
+                                    color = accent,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clickable { viewModel.selectedTab = 2 }
+                                )
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            recentTracks.take(4).forEach { track ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val idx = allTracks.indexOfFirst { it.id == track.id }
+                                            viewModel.playFromList(allTracks, if (idx >= 0) idx else 0, "Recently Played")
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CoverArt(
+                                        track = track,
+                                        sizeDp = 40.dp
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = track.title,
+                                            color = text,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = track.artist,
+                                            color = muted,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = formatTime(track.duration),
+                                        color = muted,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─── Soundscapes Section ───────────────────────────────────────
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 32.dp, bottom = 12.dp)
+                    .padding(horizontal = 20.dp)
+            ) {
+                Text(
+                    text = "Soundscapes",
+                    color = text,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.3).sp
+                )
+                Text(
+                    text = "Curated vibes for your mood",
+                    color = muted,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                soundscapes.chunked(2).forEach { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        for (idx in pair.indices) {
+                            val scape = pair[idx]
+                            val seed = SonaraDesign.hashString(scape.id)
+                            val toneIndex = ((seed ushr 3) and 0x7FFFFFFF) % SonaraDesign.SoundscapeTones.size
+                            val tone = SonaraDesign.SoundscapeTones[toneIndex]
+
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(140.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                color = tone.bg
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clickable {
+                                            if (scape.id == "favorites") {
+                                                viewModel.selectedTab = 1
+                                            } else {
+                                                val folder = viewModel.userPlaylists.find { it.name == scape.id }
+                                                    ?: viewModel.folders.find { it.name == scape.id }
+                                                if (folder != null) onFolderClick(folder)
+                                            }
+                                        }
+                                        .padding(16.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(999.dp),
+                                                color = tone.fg.copy(alpha = 0.15f),
+                                                border = BorderStroke(1.dp, tone.fg.copy(alpha = 0.4f))
+                                            ) {
+                                                Text(
+                                                    text = scape.kind,
+                                                    color = tone.fg,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                text = scape.name,
+                                                color = tone.fg,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "${scape.tracks.size} tracks",
+                                                color = tone.fg.copy(alpha = 0.8f),
+                                                fontSize = 12.sp
+                                            )
+
+                                            IconButton(
+                                                onClick = {
+                                                    if (scape.tracks.isNotEmpty()) {
+                                                        viewModel.startPlayback(scape.tracks, 0, scape.name)
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .background(tone.fg, CircleShape)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = tone.bg,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (pair.size == 1) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─── Jump Back In Section ──────────────────────────────────────
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 32.dp, bottom = 12.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Jump back in",
+                        color = text,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        text = "Recently added to your library",
+                        color = muted,
+                        fontSize = 13.sp
+                    )
+                }
+                Text(
+                    text = "See everything",
+                    color = accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { viewModel.selectedTab = 2 }
+                )
+            }
+        }
+
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val sortedRecent = allTracks.sortedByDescending { it.dateAdded }.take(10)
+                itemsIndexed(sortedRecent) { index, track ->
+                    Column(
+                        modifier = Modifier
+                            .width(140.dp)
+                            .clickable {
+                                viewModel.playFromList(sortedRecent, index, "Recently Added")
+                            }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                        ) {
+                            CoverArt(
+                                track = track,
+                                sizeDp = 140.dp
+                            )
+                            IconButton(
+                                onClick = { viewModel.playFromList(sortedRecent, index, "Recently Added") },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .size(36.dp)
+                                    .background(SonaraDesign.DarkInk, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying && current?.id == track.id) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = SonaraDesign.DarkOnInk,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            text = track.title,
+                            color = text,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = track.artist,
+                            color = muted,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class SoundscapeItem(
+    val id: String,
+    val name: String,
+    val kind: String,
+    val tracks: List<Track>
+)
+
+private fun formatTime(ms: Long): String {
+    val totalSeconds = if (ms / 1000 < 0) 0 else ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "$minutes:${if (seconds < 10) "0$seconds" else "$seconds"}"
 }
