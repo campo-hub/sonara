@@ -67,12 +67,12 @@ private fun OnlineTransitionScreen(
     val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
     val accent = themeViewModel.getAccentColor(isDark)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bg),
-        contentAlignment = Alignment.Center
-    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -537,62 +537,41 @@ private fun OfflineHomeView(
                         )
                     }
 
-                    Column(
-                        modifier = Modifier.width(160.dp),
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    IconButton(onClick = onUpload, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Default.FileUpload, contentDescription = "Add music", tint = accent, modifier = Modifier.size(20.dp))
+                    }
+                    Surface(
+                        onClick = if (viewModel.userEmail == null) onOpenAuth else ({}),
+                        modifier = Modifier.widthIn(min = 66.dp, max = 112.dp),
+                        shape = RoundedCornerShape(999.dp),
+                        color = paper,
+                        border = BorderStroke(1.dp, line)
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onUpload, modifier = Modifier.size(34.dp)) {
-                                Icon(Icons.Default.FileUpload, contentDescription = "Add music", tint = accent, modifier = Modifier.size(20.dp))
-                            }
-                            Surface(
-                                onClick = if (viewModel.userEmail == null) onOpenAuth else ({}),
-                                modifier = Modifier.widthIn(min = 66.dp, max = 112.dp),
-                                shape = RoundedCornerShape(999.dp),
-                                color = paper,
-                                border = BorderStroke(1.dp, line)
-                            ) {
-                                Text(
-                                    text = viewModel.username ?: viewModel.userEmail?.substringBefore('@') ?: "Sign in",
-                                    color = text,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp).fillMaxWidth()
-                                )
-                            }
-                            if (viewModel.userEmail != null) {
-                                IconButton(onClick = onSignOut, modifier = Modifier.size(34.dp)) {
-                                    Icon(Icons.Default.Logout, contentDescription = "Sign out", tint = muted, modifier = Modifier.size(19.dp))
-                                }
-                            }
-                        }
-                        Surface(
-                            onClick = { viewModel.toggleOnlineMode(!viewModel.isOnlineMode) },
-                            modifier = Modifier.width(112.dp),
-                            shape = RoundedCornerShape(999.dp),
-                            color = if (viewModel.isOnlineMode) accent else paper,
-                            border = BorderStroke(1.dp, if (viewModel.isOnlineMode) accent else line)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(Icons.Default.Cloud, contentDescription = null, tint = if (viewModel.isOnlineMode) Color.White else accent, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (viewModel.isOnlineMode) "Online" else "Go online", color = if (viewModel.isOnlineMode) Color.White else accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
+                        Text(
+                            text = viewModel.username ?: viewModel.userEmail?.substringBefore('@') ?: "Sign in",
+                            color = text,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp).fillMaxWidth()
+                        )
+                    }
+                    if (viewModel.userEmail != null) {
+                        IconButton(onClick = onSignOut, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Default.Logout, contentDescription = "Sign out", tint = muted, modifier = Modifier.size(19.dp))
                         }
                     }
                 }
 
                 Spacer(Modifier.height(8.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = "SONARA",
                         color = muted,
@@ -600,14 +579,23 @@ private fun OfflineHomeView(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 2.sp
                     )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "Set the tone for the next hour.",
-                        color = text,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
-                    )
+                    Surface(
+                        onClick = { viewModel.toggleOnlineMode(!viewModel.isOnlineMode) },
+                        modifier = Modifier.width(112.dp),
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (viewModel.isOnlineMode) accent else paper,
+                        border = BorderStroke(1.dp, if (viewModel.isOnlineMode) accent else line)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Cloud, contentDescription = null, tint = if (viewModel.isOnlineMode) Color.White else accent, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (viewModel.isOnlineMode) "Online" else "Go online", color = if (viewModel.isOnlineMode) Color.White else accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
                 }
             }
         }

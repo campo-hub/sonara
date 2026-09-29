@@ -44,7 +44,12 @@ export async function isAdminUser(user) {
   if (!user) return false;
   const admin = await getAdminConfig();
   if (!admin) return false;
-  const userEmail = (user.email || '').toLowerCase();
-  const adminEmail = (admin.email || '').toLowerCase();
-  return (user.uid && user.uid === admin.uid) || (Boolean(userEmail) && userEmail === adminEmail);
+
+  if (user.uid && user.uid === admin.uid) return true;
+
+  const userEmail = String(user.email || '').trim().toLowerCase();
+  const adminEmail = String(admin.email || '').trim().toLowerCase();
+  const emailVerified = Boolean(user.email_verified);
+
+  return Boolean(userEmail && emailVerified && adminEmail && userEmail === adminEmail);
 }

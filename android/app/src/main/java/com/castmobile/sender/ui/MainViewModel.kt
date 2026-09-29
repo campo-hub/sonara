@@ -688,7 +688,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         syncUserLibraryToCloud()
     }
 
-    private fun loadUserPlaylists() {}
+    private fun loadUserPlaylists() {
+        updateUserPlaylistsTracks()
+    }
 
     private fun updateUserPlaylistsTracks() {
         val playlists = mutableListOf<Folder>()
@@ -730,13 +732,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         userPlaylists = playlists
     }
 
+    private fun playlistKey(name: String): String = name.trim()
+
+    private fun matchesTrackId(storedValue: Any?, trackId: Long): Boolean {
+        return when (storedValue) {
+            is Number -> storedValue.toLong() == trackId
+            is String -> {
+                val normalized = storedValue.trim()
+                normalized == trackId.toString() || normalized.toLongOrNull() == trackId
+            }
+            else -> false
+        }
+    }
+
     fun createPlaylist(name: String) {
-        if (name.isBlank()) return
+        val normalizedName = playlistKey(name)
+        if (normalizedName.isBlank()) return
         val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
         try {
             val json = JSONObject(playlistsJson)
-            if (!json.has(name)) {
-                json.put(name, JSONArray())
+            if (!json.has(normalizedName)) {
+                json.put(normalizedName, JSONArray())
                 prefs.edit().putString("playlists", json.toString()).apply()
                 updateUserPlaylistsTracks()
                 syncUserLibraryToCloud()
@@ -744,21 +760,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {}
     }
 
-    fun addTrackToPlaylist(trackId: Long, playlistName: String) {
+    fun renamePlaylist(oldName: String, newName: String) {
+        val normalizedOld = playlistKey(oldName)
+        val normalizedNew = playlistKey(newName)
+        if (normalizedOld.isBlank() || normalizedNew.isBlank() || normalizedOld == normalizedNew) return
+
         val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
         try {
             val json = JSONObject(playlistsJson)
-            val array = json.optJSONArray(playlistName) ?: JSONArray()
+            if (!json.has(normalizedOld)) return
+            val existingTracks = json.optJSONArray(normalizedOld) ?: JSONArray()
+            json.remove(normalizedOld)
+            json.put(normalizedNew, existingTracks)
+            prefs.edit().putString("playlists", json.toString()).apply()
+            updateUserPlaylistsTracks()
+            syncUserLibraryToCloud()
+
+            if (currentFolder?.name == normalizedOld) {
+                currentFolder = userPlaylists.find { it.name == normalizedNew }
+            }
+        } catch (e: Exception) {}
+    }
+
+    fun addTrackToPlaylist(trackId: Long, playlistName: String) {
+        val normalizedName = playlistKey(playlistName)
+        if (normalizedName.isBlank()) return
+
+        val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
+        try {
+            val json = JSONObject(playlistsJson)
+            val array = json.optJSONArray(normalizedName) ?: JSONArray()
             var exists = false
             for (i in 0 until array.length()) {
-                if (array.getLong(i) == trackId) {
+                if (matchesTrackId(array.get(i), trackId)) {
                     exists = true
                     break
                 }
             }
             if (!exists) {
-                array.put(trackId)
-                json.put(playlistName, array)
+                array.put(trackId.toString())
+                json.put(normalizedName, array)
                 prefs.edit().putString("playlists", json.toString()).apply()
                 updateUserPlaylistsTracks()
                 syncUserLibraryToCloud()
@@ -767,23 +808,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeTrackFromPlaylist(trackId: Long, playlistName: String) {
+        val normalizedName = playlistKey(playlistName)
+        if (normalizedName.isBlank()) return
+
         val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
         try {
             val json = JSONObject(playlistsJson)
-            val array = json.optJSONArray(playlistName) ?: return
+            val array = json.optJSONArray(normalizedName) ?: return
             val newArray = JSONArray()
             for (i in 0 until array.length()) {
-                if (array.getLong(i) != trackId) {
+                if (!matchesTrackId(array.get(i), trackId)) {
                     newArray.put(array.get(i))
                 }
             }
-            json.put(playlistName, newArray)
+            json.put(normalizedName, newArray)
             prefs.edit().putString("playlists", json.toString()).apply()
             updateUserPlaylistsTracks()
             syncUserLibraryToCloud()
             
-            if (currentFolder?.name == playlistName) {
-                currentFolder = userPlaylists.find { it.name == playlistName }
+            if (currentFolder?.name == normalizedName) {
+                currentFolder = userPlaylists.find { it.name == normalizedName }
             }
         } catch (e: Exception) {}
     }
@@ -1230,21 +1274,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addSelectedTracksToPlaylist(playlistName: String) {
+        val normalizedName = playlistKey(playlistName)
+        if (normalizedName.isBlank()) return
+
         val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
         try {
             val json = JSONObject(playlistsJson)
-            val array = json.optJSONArray(playlistName) ?: JSONArray()
+            val array = json.optJSONArray(normalizedName) ?: JSONArray()
             selectedTrackIds.forEach { id ->
                 var exists = false
                 for (i in 0 until array.length()) {
-                    if (array.getLong(i) == id) {
+                    if (matchesTrackId(array.get(i), id)) {
                         exists = true
                         break
                     }
                 }
-                if (!exists) array.put(id)
+                if (!exists) array.put(id.toString())
             }
-            json.put(playlistName, array)
+            json.put(normalizedName, array)
             prefs.edit().putString("playlists", json.toString()).apply()
             updateUserPlaylistsTracks()
             syncUserLibraryToCloud()
@@ -1271,13 +1318,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteFolder(folder: Folder) {
+        val normalizedName = playlistKey(folder.name)
         val playlistsJson = prefs.getString("playlists", "{}") ?: "{}"
         try {
             val json = JSONObject(playlistsJson)
-            if (json.has(folder.name)) {
-                json.remove(folder.name)
+            if (json.has(normalizedName)) {
+                json.remove(normalizedName)
                 prefs.edit().putString("playlists", json.toString()).apply()
                 updateUserPlaylistsTracks()
+                if (currentFolder?.name == normalizedName) {
+                    currentFolder = null
+                }
+                syncUserLibraryToCloud()
                 return
             }
         } catch (e: Exception) {}

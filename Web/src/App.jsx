@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
-import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, saveCachedCatalog } from './catalogUtils.js';
+import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, mergePlaylistList, normalizePlaylistShape, saveCachedCatalog } from './catalogUtils.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -972,7 +972,7 @@ function TransportControls({ isPlaying, shuffle, repeat, disabled, onToggle, onN
 }
 
 
-function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLike, showWaveform }) {
+function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLike, onAddToPlaylist, onRemoveFromPlaylist, showWaveform }) {
   return (
     <ol className="tracklist">
       {tracks.map((track, index) => {
@@ -1002,6 +1002,16 @@ function Tracklist({ tracks, currentId, isPlaying, likedIds, onPlay, onToggleLik
               {showWaveform && <Waveform seed={hashString(track.id)} active={isCurrent} />}
             </span>
             <span className="tl-time">{formatTime(track.seconds)}</span>
+            {onAddToPlaylist && (
+              <button type="button" className="icon-btn playlist-add" onClick={() => onAddToPlaylist(track)} aria-label={`Add ${track.title} to a playlist`}>
+                <Icon name="plus" size={18} />
+              </button>
+            )}
+            {onRemoveFromPlaylist && (
+              <button type="button" className="icon-btn playlist-remove" onClick={() => onRemoveFromPlaylist(track.id)} aria-label={`Remove ${track.title} from this playlist`}>
+                <Icon name="x" size={18} />
+              </button>
+            )}
             <button type="button" className={`icon-btn heart ${isLiked ? 'is-on' : ''}`} onClick={() => onToggleLike(track.id)} aria-pressed={isLiked} aria-label={isLiked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}>
               <Icon name="heart" size={19} filled={isLiked} />
             </button>
@@ -1199,7 +1209,7 @@ function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, 
 export default function App() {
   /* navigation + preferences */
   const [view, setView] = useState('home');
-  const [playlistId, setPlaylistId] = useState('daily-mix');
+  const [playlistId, setPlaylistId] = useState('');
   const [libraryTab, setLibraryTab] = useState('songs');
   const [labTab, setLabTab] = useState('themes');
   const [query, setQuery] = useState('');
@@ -1217,7 +1227,11 @@ export default function App() {
   const [usernameError, setUsernameError] = useState('');
   const [pendingAdminClaim, setPendingAdminClaim] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState([]);
+  const [playlistMenuTrack, setPlaylistMenuTrack] = useState(null);
+  const [playlistComposer, setPlaylistComposer] = useState(null);
+  const [playlistDraft, setPlaylistDraft] = useState('');
   const [libraryHydrated, setLibraryHydrated] = useState(false);
+  const didInitialLibrarySync = useRef(false);
 
   /* Admin & Billing states */
   const [hasAdmin, setHasAdmin] = useState(true);
@@ -1422,6 +1436,138 @@ export default function App() {
     return () => { active = false; };
   }, [authUser]);
 
+  const current = queue[pos] || null;
+  const total = audioDuration || current?.seconds || 0;
+  const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
+  const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
+
+  const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
+
+  const requireAuth = useCallback((reason) => {
+    if (authUser) return true;
+    setAuthReason(reason);
+    setAuthOpen(true);
+    return false;
+  }, [authUser]);
+
+  const refreshUserPlaylists = useCallback(async () => {
+    if (!authUser) {
+      setUserPlaylists([]);
+      return;
+    }
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to load your playlists.');
+      setUserPlaylists(mergePlaylistList(Array.isArray(data) ? data : []));
+    } catch (error) {
+      setNotice(error.message || 'Unable to load your playlists.');
+    }
+  }, [authUser]);
+
+  const handleCreatePlaylist = useCallback(async (name) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return;
+    if (!requireAuth('Sign in to create playlists.')) return;
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to create playlist.');
+      setUserPlaylists((previous) => mergePlaylistList([...previous, normalizePlaylistShape(data)]));
+      setPlaylistId(data.id);
+      setNotice(`Created “${data.name}”.`);
+      setPlaylistComposer(null);
+      setPlaylistDraft('');
+      setPlaylistMenuTrack(null);
+    } catch (error) {
+      setNotice(error.message || 'Unable to create playlist.');
+    }
+  }, [authUser, requireAuth]);
+
+  const handleRenamePlaylist = useCallback(async (playlistIdValue, name) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return;
+    if (!requireAuth('Sign in to rename playlists.')) return;
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists/${playlistIdValue}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to rename playlist.');
+      setUserPlaylists((previous) => mergePlaylistList(previous.map((playlist) => (playlist.id === playlistIdValue ? normalizePlaylistShape({ ...playlist, ...data }) : playlist))));
+      setNotice(`Renamed playlist to “${data.name}”.`);
+      setPlaylistComposer(null);
+      setPlaylistDraft('');
+    } catch (error) {
+      setNotice(error.message || 'Unable to rename playlist.');
+    }
+  }, [authUser, requireAuth]);
+
+  const handleDeletePlaylist = useCallback(async (playlistIdValue) => {
+    if (!requireAuth('Sign in to delete playlists.')) return;
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists/${playlistIdValue}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to delete playlist.');
+      setUserPlaylists((previous) => previous.filter((playlist) => playlist.id !== playlistIdValue));
+      if (playlistId === playlistIdValue) setPlaylistId('');
+      setNotice('Playlist deleted.');
+      setPlaylistComposer(null);
+    } catch (error) {
+      setNotice(error.message || 'Unable to delete playlist.');
+    }
+  }, [authUser, requireAuth, playlistId]);
+
+  const handleAddTrackToPlaylist = useCallback(async (playlistIdValue, trackId) => {
+    if (!requireAuth('Sign in to add tracks to playlists.')) return;
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists/${playlistIdValue}/tracks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to add track to playlist.');
+      setUserPlaylists((previous) => mergePlaylistList(previous.map((playlist) => (playlist.id === playlistIdValue ? normalizePlaylistShape({ ...playlist, ...data.playlist }) : playlist))));
+      setNotice(`Added to “${userPlaylists.find((playlist) => playlist.id === playlistIdValue)?.name || 'playlist'}”.`);
+      setPlaylistMenuTrack(null);
+      setPlaylistDraft('');
+    } catch (error) {
+      setNotice(error.message || 'Unable to add track to playlist.');
+    }
+  }, [authUser, requireAuth, userPlaylists]);
+
+  const handleRemoveTrackFromPlaylist = useCallback(async (playlistIdValue, trackId) => {
+    if (!requireAuth('Sign in to remove tracks from playlists.')) return;
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/playlists/${playlistIdValue}/tracks/${encodeURIComponent(trackId)}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Unable to remove track from playlist.');
+      setUserPlaylists((previous) => previous.map((playlist) => {
+        if (playlist.id !== playlistIdValue) return playlist;
+        const nextTrackIds = (playlist.trackIds || []).filter((id) => id !== trackId);
+        return normalizePlaylistShape({ ...playlist, trackIds: nextTrackIds });
+      }));
+      setNotice('Track removed from playlist.');
+    } catch (error) {
+      setNotice(error.message || 'Unable to remove track from playlist.');
+    }
+  }, [authUser, requireAuth]);
+
+  const toggleLike = useCallback((id) => {
+    if (!requireAuth('Sign in to save favorites to your account.')) return;
+    setPrefs((previous) => ({
+      ...previous,
+      liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
+    }));
+  }, [requireAuth]);
+
   useEffect(() => {
     let active = true;
     if (!authUser) {
@@ -1440,7 +1586,8 @@ export default function App() {
           ...(data.preferences || {}),
           liked: Array.isArray(data.preferences?.liked) ? data.preferences.liked : previous.liked
         }));
-        setUserPlaylists(Array.isArray(data.playlists) ? data.playlists : []);
+        setUserPlaylists(mergePlaylistList(Array.isArray(data.playlists) ? data.playlists : []));
+        await refreshUserPlaylists();
       } catch (error) {
         if (active) setNotice(error.message || 'Unable to load your library.');
       } finally {
@@ -1448,11 +1595,16 @@ export default function App() {
       }
     })();
     return () => { active = false; };
-  }, [authUser]);
+  }, [authUser, refreshUserPlaylists]);
 
   useEffect(() => {
-    if (!authUser || !libraryHydrated) return;
-    const syncUserLibrary = async () => {
+    if (!authUser || !libraryHydrated) return undefined;
+    if (!didInitialLibrarySync.current) {
+      didInitialLibrarySync.current = true;
+      return undefined;
+    }
+
+    const timer = setTimeout(async () => {
       try {
         const payload = {
           preferences: {
@@ -1464,8 +1616,7 @@ export default function App() {
             spin: prefs.spin,
             volume: prefs.volume,
             liked: prefs.liked
-          },
-          playlists: userPlaylists
+          }
         };
         const response = await authenticatedJsonRequest(`${apiBase}/me/library`, {
           method: 'PUT',
@@ -1478,31 +1629,10 @@ export default function App() {
       } catch (error) {
         setNotice(error.message || 'Unable to sync your library.');
       }
-    };
-    syncUserLibrary();
-  }, [authUser, libraryHydrated, prefs, userPlaylists]);
+    }, 350);
 
-  const current = queue[pos] || null;
-  const total = audioDuration || current?.seconds || 0;
-  const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
-  const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
-
-  const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
-
-  const requireAuth = useCallback((reason) => {
-    if (authUser) return true;
-    setAuthReason(reason);
-    setAuthOpen(true);
-    return false;
-  }, [authUser]);
-
-  const toggleLike = useCallback((id) => {
-    if (!requireAuth('Sign in to save favorites to your account.')) return;
-    setPrefs((previous) => ({
-      ...previous,
-      liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
-    }));
-  }, [requireAuth]);
+    return () => clearTimeout(timer);
+  }, [authUser, libraryHydrated, prefs.theme, prefs.accent, prefs.customAccent, prefs.waveforms, prefs.compact, prefs.spin, prefs.volume, prefs.liked]);
 
   /* ------------------------------ data ------------------------------ */
 
@@ -1629,7 +1759,7 @@ export default function App() {
       })),
     [catalogTracks, trackById, userPlaylists, userUploadPlaylists]
   );
-  const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0];
+  const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0] || null;
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
   const recentTracks = useMemo(() => [...allTracks].sort((a, b) => b.addedAt - a.addedAt).slice(0, 6), [allTracks]);
 
@@ -2122,10 +2252,6 @@ export default function App() {
               <i className="live-dot" aria-hidden="true" />
               {greeting()}, {getUserDisplayName(authUser)}
             </p>
-            <div className="hero-intro">
-              <span className="hero-kicker">Sonara</span>
-              <h1>Set the tone for the next hour.</h1>
-            </div>
           </div>
 
           <div className="hero-grid">
@@ -2238,7 +2364,12 @@ export default function App() {
         )}
       </div>
       {visibleTracks.length ? (
-        <Tracklist tracks={visibleTracks} {...tableProps} onPlay={(index) => playFromList(visibleTracks, index, query ? `Search: ${query}` : 'All Music')} />
+        <Tracklist
+          tracks={visibleTracks}
+          {...tableProps}
+          onPlay={(index) => playFromList(visibleTracks, index, query ? `Search: ${query}` : 'All Music')}
+          onAddToPlaylist={(track) => setPlaylistMenuTrack(track)}
+        />
       ) : (
         <EmptyState icon="search" title="No matches" text={`Nothing in your library matches “${query}”.`} action={<button type="button" className="btn" onClick={() => setQuery('')}>Clear search</button>} />
       )}
@@ -2260,7 +2391,14 @@ export default function App() {
         ))}
       </div>
 
-      {libraryTab === 'songs' && <Tracklist tracks={libraryTracks} {...tableProps} onPlay={(index) => playFromList(libraryTracks, index, 'Library')} />}
+      {libraryTab === 'songs' && (
+        <Tracklist
+          tracks={libraryTracks}
+          {...tableProps}
+          onPlay={(index) => playFromList(libraryTracks, index, 'Library')}
+          onAddToPlaylist={(track) => setPlaylistMenuTrack(track)}
+        />
+      )}
 
       {libraryTab === 'albums' && (
         <div className="sleeve-grid">
@@ -2320,48 +2458,74 @@ export default function App() {
     </>
   );
 
-  const renderPlaylists = () => (
-    <div className="pl-layout">
-      <nav className="pl-menu" aria-label="Choose a playlist">
-        {playlists.map((playlist) => (
-          <button key={playlist.id} type="button" className={`pl-item ${playlist.id === selectedPlaylist.id ? 'is-active' : ''}`} aria-current={playlist.id === selectedPlaylist.id ? 'true' : undefined} onClick={() => setPlaylistId(playlist.id)}>
-            <span>{playlist.name}</span>
-            <sup>{playlist.tracks.length}</sup>
-          </button>
-        ))}
-      </nav>
+  const renderPlaylists = () => {
+    if (!selectedPlaylist) {
+      return (
+        <EmptyState icon="list" title="No playlists yet" text="Create your first playlist to start collecting favorites and mood-based mixes." action={<button type="button" className="btn" onClick={() => setPlaylistComposer({ mode: 'create', playlistId: null, name: '' })}>New playlist</button>} />
+      );
+    }
 
-      <section className="pl-main">
-        <div className="pl-head">
-          <div className="pl-cover">
-            <SleeveStack track={{ id: selectedPlaylist.id }} playing={false} spin={false} />
-          </div>
-          <div className="pl-info">
-            <h2>{selectedPlaylist.name}</h2>
-            <p>{selectedPlaylist.description}</p>
-            <small>
-              {plural(selectedPlaylist.tracks.length, 'track')}
-              {selectedPlaylist.tracks.length ? `, ${totalRuntime(selectedPlaylist.tracks)}` : ''}
-            </small>
-            <div className="pl-actions">
-              <button type="button" className="btn btn-primary" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, 0, selectedPlaylist.name, false)}>
-                <Icon name="play" size={16} /> Play
-              </button>
-              <button type="button" className="btn" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, Math.floor(Math.random() * selectedPlaylist.tracks.length), selectedPlaylist.name, true)}>
-                <Icon name="shuffle" size={16} /> Shuffle
-              </button>
+    const isUserPlaylist = !selectedPlaylist.dynamic && !defaultPlaylists.some((item) => item.id === selectedPlaylist.id);
+
+    return (
+      <div className="pl-layout">
+        <nav className="pl-menu" aria-label="Choose a playlist">
+          {playlists.map((playlist) => (
+            <button key={playlist.id} type="button" className={`pl-item ${playlist.id === selectedPlaylist.id ? 'is-active' : ''}`} aria-current={playlist.id === selectedPlaylist.id ? 'true' : undefined} onClick={() => setPlaylistId(playlist.id)}>
+              <span>{playlist.name}</span>
+              <sup>{playlist.tracks.length}</sup>
+            </button>
+          ))}
+        </nav>
+
+        <section className="pl-main">
+          <div className="pl-head">
+            <div className="pl-cover">
+              <SleeveStack track={{ id: selectedPlaylist.id }} playing={false} spin={false} />
+            </div>
+            <div className="pl-info">
+              <h2>{selectedPlaylist.name}</h2>
+              <p>{selectedPlaylist.description}</p>
+              <small>
+                {plural(selectedPlaylist.tracks.length, 'track')}
+                {selectedPlaylist.tracks.length ? `, ${totalRuntime(selectedPlaylist.tracks)}` : ''}
+              </small>
+              <div className="pl-actions">
+                <button type="button" className="btn btn-primary" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, 0, selectedPlaylist.name, false)}>
+                  <Icon name="play" size={16} /> Play
+                </button>
+                <button type="button" className="btn" disabled={!selectedPlaylist.tracks.length} onClick={() => startPlayback(selectedPlaylist.tracks, Math.floor(Math.random() * selectedPlaylist.tracks.length), selectedPlaylist.name, true)}>
+                  <Icon name="shuffle" size={16} /> Shuffle
+                </button>
+                {isUserPlaylist && (
+                  <>
+                    <button type="button" className="btn" onClick={() => { setPlaylistDraft(selectedPlaylist.name); setPlaylistComposer({ mode: 'rename', playlistId: selectedPlaylist.id, name: selectedPlaylist.name }); }}>
+                      <Icon name="plus" size={16} /> Rename
+                    </button>
+                    <button type="button" className="btn btn-cancel" onClick={() => handleDeletePlaylist(selectedPlaylist.id)}>
+                      <Icon name="x" size={16} /> Delete
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {selectedPlaylist.tracks.length ? (
-          <Tracklist tracks={selectedPlaylist.tracks} {...tableProps} onPlay={(index) => playFromList(selectedPlaylist.tracks, index, selectedPlaylist.name)} />
-        ) : (
-          <EmptyState icon="upload" title="No uploads yet" text="Tracks you upload will appear here." action={<button type="button" className="btn" onClick={() => goTo('upload')}>Add music</button>} />
-        )}
-      </section>
-    </div>
-  );
+          {selectedPlaylist.tracks.length ? (
+            <Tracklist
+              tracks={selectedPlaylist.tracks}
+              {...tableProps}
+              onPlay={(index) => playFromList(selectedPlaylist.tracks, index, selectedPlaylist.name)}
+              onAddToPlaylist={(track) => setPlaylistMenuTrack(track)}
+              onRemoveFromPlaylist={(trackId) => handleRemoveTrackFromPlaylist(selectedPlaylist.id, trackId)}
+            />
+          ) : (
+            <EmptyState icon="upload" title="No tracks yet" text="Add songs from your library to build this playlist." action={<button type="button" className="btn" onClick={() => goTo('all-music')}>Browse all music</button>} />
+          )}
+        </section>
+      </div>
+    );
+  }; 
 
   const renderFavorites = () =>
     favoriteTracks.length ? (
@@ -2374,7 +2538,12 @@ export default function App() {
             <Icon name="shuffle" size={16} /> Shuffle
           </button>
         </div>
-        <Tracklist tracks={favoriteTracks} {...tableProps} onPlay={(index) => playFromList(favoriteTracks, index, 'Favorites')} />
+        <Tracklist
+          tracks={favoriteTracks}
+          {...tableProps}
+          onPlay={(index) => playFromList(favoriteTracks, index, 'Favorites')}
+          onAddToPlaylist={(track) => setPlaylistMenuTrack(track)}
+        />
       </>
     ) : (
       <EmptyState icon="heart" title="No favorites yet" text="Tap the heart on any track and it will show up here." action={<button type="button" className="btn" onClick={() => goTo('all-music')}>Browse all music</button>} />
@@ -3018,6 +3187,58 @@ export default function App() {
         setUsernameOpen(false);
         setNotice(`Welcome to Sonara, ${profile.username}.`);
       }} />}
+
+      {playlistMenuTrack && (
+        <div className="playlist-menu" role="dialog" aria-label={`Add ${playlistMenuTrack.title} to a playlist`}>
+          <div className="playlist-menu-head">
+            <strong>Add “{playlistMenuTrack.title}”</strong>
+            <button type="button" className="icon-btn" onClick={() => setPlaylistMenuTrack(null)} aria-label="Close playlist menu">
+              <Icon name="x" size={18} />
+            </button>
+          </div>
+          <div className="playlist-menu-list">
+            {userPlaylists.length ? userPlaylists.map((playlist) => (
+              <button key={playlist.id} type="button" className="playlist-option" onClick={() => handleAddTrackToPlaylist(playlist.id, playlistMenuTrack.id)}>
+                <span>{playlist.name}</span>
+                <small>{plural(playlist.trackIds?.length || playlist.tracks?.length || 0, 'track')}</small>
+              </button>
+            )) : <p className="muted-text">Create a playlist to save this song.</p>}
+          </div>
+          <div className="playlist-menu-form">
+            <input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="New playlist name" aria-label="New playlist name" />
+            <button type="button" className="btn btn-primary" onClick={() => { if (playlistDraft.trim()) { handleCreatePlaylist(playlistDraft); } else { setPlaylistComposer({ mode: 'create', playlistId: null, name: '' }); setPlaylistDraft(''); } }}>
+              Create
+            </button>
+          </div>
+        </div>
+      )}
+
+      {playlistComposer && (
+        <div className="playlist-editor" role="dialog" aria-label={playlistComposer.mode === 'rename' ? 'Rename playlist' : 'Create playlist'}>
+          <div className="playlist-menu-head">
+            <strong>{playlistComposer.mode === 'rename' ? 'Rename playlist' : 'New playlist'}</strong>
+            <button type="button" className="icon-btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }} aria-label="Close playlist editor">
+              <Icon name="x" size={18} />
+            </button>
+          </div>
+          <label className="playlist-editor-field">
+            <span>Playlist name</span>
+            <input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="Weekend drives" aria-label="Playlist name" />
+          </label>
+          <div className="playlist-editor-actions">
+            <button type="button" className="btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => {
+              if (!playlistDraft.trim()) return;
+              if (playlistComposer.mode === 'rename') handleRenamePlaylist(playlistComposer.playlistId, playlistDraft);
+              else handleCreatePlaylist(playlistDraft);
+            }}>
+              {playlistComposer.mode === 'rename' ? 'Save' : 'Create'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {notice && (
         <div className="toast" role="status">

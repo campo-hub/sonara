@@ -661,6 +661,46 @@ fun LiquidFolderDetail(
     val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
     val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
     val accent = themeViewModel.getAccentColor(isDark)
+    val isUserPlaylist = folder.name != "Favorites" && viewModel.userPlaylists.any { it.name == folder.name }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameDraft by remember(folder.name) { mutableStateOf(folder.name) }
+
+    if (showRenameDialog && isUserPlaylist) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor = paper,
+            title = { Text("Rename Playlist", color = text, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Playlist name", color = muted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accent,
+                        unfocusedBorderColor = line,
+                        cursorColor = accent,
+                        focusedTextColor = text,
+                        unfocusedTextColor = text
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.renamePlaylist(folder.name, renameDraft)
+                    showRenameDialog = false
+                }) {
+                    Text("Save", color = accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel", color = muted)
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -735,6 +775,35 @@ fun LiquidFolderDetail(
                         Icon(Icons.Default.Shuffle, contentDescription = null, tint = text, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Shuffle", color = text, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (isUserPlaylist) {
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { renameDraft = folder.name; showRenameDialog = true },
+                            border = BorderStroke(1.dp, line),
+                            shape = RoundedCornerShape(999.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = text)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Rename")
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.deleteFolder(folder) },
+                            border = BorderStroke(1.dp, Color(0xFFFF5252)),
+                            shape = RoundedCornerShape(999.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252))
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Delete")
+                        }
                     }
                 }
 

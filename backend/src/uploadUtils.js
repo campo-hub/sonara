@@ -62,12 +62,11 @@ export const buildObjectKey = (relativePath, rootDir = 'uploads') => {
     .filter(Boolean)
     .map(sanitizeSegment)
     .filter(Boolean);
-  const unique = crypto.randomBytes(4).toString('hex');
   const fileName = cleanPath.pop() || 'file';
   const dotIndex = fileName.lastIndexOf('.');
   const base = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
   const ext = dotIndex > 0 ? fileName.slice(dotIndex) : '';
-  const finalName = `${base}-${unique}${ext}`;
+  const finalName = `${base}${ext}`;
   return [rootDir, ...cleanPath, finalName].filter(Boolean).join('/');
 };
 

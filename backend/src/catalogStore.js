@@ -22,13 +22,20 @@ export function isMongoConfigured() {
   return Boolean(process.env.MONGODB_URI);
 }
 
+export async function getDb() {
+  if (!isMongoConfigured()) return null;
+  if (!mongoClient) {
+    mongoClient = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
+    await mongoClient.connect();
+  }
+  const dbName = process.env.MONGODB_DB_NAME || 'sonara';
+  return mongoClient.db(dbName);
+}
+
 export async function getTrackCollection() {
   if (!isMongoConfigured()) return null;
   if (collection) return collection;
-  mongoClient = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
-  await mongoClient.connect();
-  const dbName = process.env.MONGODB_DB_NAME || 'sonara';
-  const db = mongoClient.db(dbName);
+  const db = await getDb();
   collection = db.collection('tracks');
   await collection.createIndex({ id: 1 }, { unique: true });
   await collection.createIndex({ createdAt: -1 });

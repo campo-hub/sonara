@@ -32,7 +32,7 @@ test('finds music in the bucket even when the DB already has a track (the report
   assert.equal(result.added, 3);
   const added = deps.store.filter((t) => t.source === 'bucket');
   assert.equal(added.length, 3);
-  assert.ok(added.every((t) => t.audioUrl.startsWith('https://pub.r2.dev/')));
+  assert.ok(added.every((t) => t.audioUrl.startsWith('https://pub-de00b21f1e9743ce91e7947956335a70.r2.dev/')));
   const song = added.find((t) => t.objectKey === 'music/Artist - Song One.mp3');
   assert.equal(song.title, 'Song One');
   assert.equal(song.artist, 'Artist');

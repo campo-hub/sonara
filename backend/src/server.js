@@ -14,10 +14,20 @@ import {
   buildFallbackCatalog
 } from './uploadUtils.js';
 import { isStorageConfigured, listObjects, putObject, publicUrlFor } from './storage.js';
-import { upsertTrack, listTracks, storageMode, isMongoConfigured } from './catalogStore.js';
-import { buildEmptyLibraryPayload } from './libraryUtils.js';
+import { upsertTrack, listTracks, storageMode, isMongoConfigured, getDb, trackExists } from './catalogStore.js';
+import { buildEmptyLibraryPayload, mergeLibraryData, normalizeLibraryData } from './libraryUtils.js';
 import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
 import { getAdminConfig, claimAdmin, isAdminUser } from './adminStore.js';
+import {
+  addTrackToPlaylist,
+  createPlaylistForUser,
+  deletePlaylistForUser,
+  listUserPlaylists,
+  migrateLegacyPlaylistsForUser,
+  normalizePlaylistName,
+  removeTrackFromPlaylist,
+  renamePlaylistForUser
+} from './playlistStore.js';
 import { getUserProfile, saveUserProfile, validateUsername } from './userStore.js';
 
 const app = express();
@@ -88,6 +98,23 @@ async function optionalAuth(req, _res, next) {
     }
   }
   next();
+}
+
+async function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Sign in to continue.' });
+  }
+  return next();
+}
+
+async function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Sign in to continue.' });
+  }
+  if (!(await isAdminUser(req.user))) {
+    return res.status(403).json({ message: 'Access denied: Admin privileges required.' });
+  }
+  return next();
 }
 
 app.use(optionalAuth);
@@ -352,15 +379,12 @@ app.get('/api/me/library', async (req, res) => {
     if (!req.user) return res.json(buildEmptyLibraryPayload());
     if (!isMongoConfigured()) return res.json(buildEmptyLibraryPayload());
 
-    const { getTrackCollection } = await import('./catalogStore.js');
-    const col = await getTrackCollection();
-    const db = col.s.db; // reuse the already-connected Mongo client's db handle
+    const db = await getDb();
     const doc = await db.collection('userLibraries').findOne({ uid: req.user.uid });
-    res.json(doc?.data || buildEmptyLibraryPayload());
+    const normalized = normalizeLibraryData(doc?.data || buildEmptyLibraryPayload());
+    res.json(normalized);
   } catch (error) {
     console.error('[library] read failed', error);
-    // Degrade gracefully: an empty library, not a 500, so the frontend
-    // never has to special-case a broken backend into a broken UI.
     res.json(buildEmptyLibraryPayload());
   }
 });
@@ -370,16 +394,129 @@ app.put('/api/me/library', async (req, res) => {
     if (!req.user) return res.status(401).json({ message: 'Sign in to sync your library.' });
     if (!isMongoConfigured()) return res.json({ ok: true, persisted: false });
 
-    const { getTrackCollection } = await import('./catalogStore.js');
-    const col = await getTrackCollection();
-    const db = col.s.db;
-    await db
-      .collection('userLibraries')
-      .updateOne({ uid: req.user.uid }, { $set: { uid: req.user.uid, data: req.body, updatedAt: new Date() } }, { upsert: true });
-    res.json({ ok: true, persisted: true });
+    const db = await getDb();
+    const existing = await db.collection('userLibraries').findOne({ uid: req.user.uid });
+    const merged = mergeLibraryData(existing?.data || buildEmptyLibraryPayload(), req.body || {});
+
+    await db.collection('userLibraries').updateOne(
+      { uid: req.user.uid },
+      { $set: { uid: req.user.uid, data: merged, updatedAt: new Date() } },
+      { upsert: true }
+    );
+
+    res.json({ ok: true, persisted: true, data: merged });
   } catch (error) {
     console.error('[library] write failed', error);
     res.status(500).json({ message: 'Unable to sync your library right now.' });
+  }
+});
+
+app.get('/api/me/playlists', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const legacyDoc = db ? await db.collection('userLibraries').findOne({ uid: req.user.uid }) : null;
+    const legacyPlaylists = Array.isArray(legacyDoc?.data?.playlists) ? legacyDoc.data.playlists : [];
+    const current = await listUserPlaylists(req.user.uid);
+
+    if (!current.length && legacyPlaylists.length) {
+      await migrateLegacyPlaylistsForUser(req.user.uid, legacyPlaylists);
+    }
+
+    const playlists = await listUserPlaylists(req.user.uid);
+    const since = req.query.since ? Number(req.query.since) : null;
+    const payload = JSON.stringify(playlists);
+    const etag = `"${Buffer.from(payload).toString('base64url')}"`;
+
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    if (since && playlists.every((playlist) => !(playlist.updatedAt && new Date(playlist.updatedAt).getTime() > since))) {
+      return res.status(304).end();
+    }
+
+    res.set('ETag', etag);
+    res.json(playlists);
+  } catch (error) {
+    console.error('[playlists] read failed', error);
+    res.status(500).json({ message: 'Unable to load your playlists right now.' });
+  }
+});
+
+app.post('/api/me/playlists', requireAuth, async (req, res) => {
+  try {
+    const name = normalizePlaylistName(req.body?.name);
+    if (!name || name.length < 1 || name.length > 60) {
+      return res.status(400).json({ message: 'Playlist name must be 1-60 characters.' });
+    }
+    const playlist = await createPlaylistForUser(req.user.uid, name);
+    res.status(201).json(playlist);
+  } catch (error) {
+    if (error.message && /already have a playlist with that name/i.test(error.message)) {
+      return res.status(409).json({ message: 'You already have a playlist with that name.' });
+    }
+    if (error.message && /maximum number of playlists/i.test(error.message)) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('[playlists] create failed', error);
+    res.status(500).json({ message: 'Unable to create your playlist right now.' });
+  }
+});
+
+app.patch('/api/me/playlists/:id', requireAuth, async (req, res) => {
+  try {
+    const name = normalizePlaylistName(req.body?.name);
+    if (!name || name.length > 60) {
+      return res.status(400).json({ message: 'Playlist name must be 1-60 characters.' });
+    }
+    const playlist = await renamePlaylistForUser(req.user.uid, req.params.id, name);
+    if (!playlist) return res.status(404).json({ message: 'Playlist not found.' });
+    res.json(playlist);
+  } catch (error) {
+    if (error.message && /already have a playlist with that name/i.test(error.message)) {
+      return res.status(409).json({ message: 'You already have a playlist with that name.' });
+    }
+    console.error('[playlists] rename failed', error);
+    res.status(500).json({ message: 'Unable to rename your playlist right now.' });
+  }
+});
+
+app.delete('/api/me/playlists/:id', requireAuth, async (req, res) => {
+  try {
+    const deleted = await deletePlaylistForUser(req.user.uid, req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Playlist not found.' });
+    res.json({ ok: true, deleted: true });
+  } catch (error) {
+    console.error('[playlists] delete failed', error);
+    res.status(500).json({ message: 'Unable to delete your playlist right now.' });
+  }
+});
+
+app.post('/api/me/playlists/:id/tracks', requireAuth, async (req, res) => {
+  try {
+    const trackId = String(req.body?.trackId || '').trim();
+    if (!trackId) return res.status(400).json({ message: 'A track id is required.' });
+    if (!(await trackExists(trackId))) return res.status(404).json({ message: 'Track not found.' });
+    const result = await addTrackToPlaylist(req.user.uid, req.params.id, trackId);
+    if (!result.playlist) return res.status(404).json({ message: 'Playlist not found.' });
+    if (!result.added) return res.json({ added: false, playlist: result.playlist });
+    res.status(201).json({ added: true, playlist: result.playlist });
+  } catch (error) {
+    if (error.message && /maximum number of tracks/i.test(error.message)) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('[playlists] add track failed', error);
+    res.status(500).json({ message: 'Unable to add the track to your playlist right now.' });
+  }
+});
+
+app.delete('/api/me/playlists/:id/tracks/:trackId', requireAuth, async (req, res) => {
+  try {
+    const removed = await removeTrackFromPlaylist(req.user.uid, req.params.id, req.params.trackId);
+    if (!removed) return res.status(404).json({ message: 'Playlist or track was not found.' });
+    res.json({ ok: true, removed: true });
+  } catch (error) {
+    console.error('[playlists] remove track failed', error);
+    res.status(500).json({ message: 'Unable to remove the track from your playlist right now.' });
   }
 });
 
@@ -440,16 +577,20 @@ app.get('/api/admin/me', async (req, res) => {
   }
 });
 
-app.post('/api/admin/claim', async (req, res) => {
+app.post('/api/admin/claim', requireAuth, async (req, res) => {
   try {
     const existing = await getAdminConfig();
     if (existing) {
       return res.status(403).json({ message: 'Admin account has already been claimed.' });
     }
 
-    const email = req.body?.email || req.user?.email || 'admin@sonara.app';
-    const uid = req.user?.uid || 'admin_uid_' + Date.now();
-    const displayName = req.body?.displayName || req.user?.name || email.split('@')[0];
+    if (!req.user?.email || !req.user?.email_verified) {
+      return res.status(403).json({ message: 'A verified email is required to claim admin access.' });
+    }
+
+    const email = req.user.email;
+    const uid = req.user.uid;
+    const displayName = req.user.name || req.user.displayName || email.split('@')[0];
 
     const result = await claimAdmin({ uid, email, displayName });
     if (!result.success) {
@@ -462,13 +603,11 @@ app.post('/api/admin/claim', async (req, res) => {
   }
 });
 
-app.get('/api/admin/stats', async (req, res) => {
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   try {
     const admin = await getAdminConfig();
-    const isCallerAdmin = await isAdminUser(req.user);
-
-    if (admin && !isCallerAdmin) {
-      return res.status(403).json({ message: 'Access denied: Admin privileges required.' });
+    if (!admin) {
+      return res.status(403).json({ message: 'Access denied: no admin has been claimed.' });
     }
 
     const tracks = await listTracks();

@@ -1829,6 +1829,115 @@ strong {
   font-style: normal;
 }
 
+.playlist-menu,
+.playlist-editor {
+  position: fixed;
+  right: 24px;
+  bottom: 116px;
+  z-index: 40;
+  width: min(420px, calc(100vw - 28px));
+  padding: 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: rgba(18, 17, 14, 0.92);
+  box-shadow: 0 24px 60px rgba(7, 10, 18, 0.33);
+  backdrop-filter: blur(14px);
+}
+
+.playlist-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.8rem;
+  color: var(--on-ink);
+}
+
+.playlist-menu-head strong {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.playlist-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.playlist-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--on-ink);
+  text-align: left;
+}
+
+.playlist-option small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.playlist-menu-form,
+.playlist-editor-field,
+.playlist-editor-actions {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.playlist-menu-form {
+  margin-top: 0.9rem;
+}
+
+.playlist-menu-form input,
+.playlist-editor-field input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  padding: 0.75rem 0.9rem;
+}
+
+.playlist-editor-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+}
+
+.playlist-editor-field span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.playlist-editor-actions {
+  justify-content: flex-end;
+}
+
+.playlist-add,
+.playlist-remove {
+  opacity: 0.88;
+}
+
+.playlist-add:hover,
+.playlist-remove:hover {
+  opacity: 1;
+}
+
 .pl-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
