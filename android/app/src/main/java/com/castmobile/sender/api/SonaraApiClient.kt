@@ -47,7 +47,7 @@ class SonaraApiClient {
         .build()
 
     private val gson = Gson()
-    val firebaseApiKey = "AIzaSyAC1GWoN9Gxmk7vpAL5nlDEOQPCo00-vhg"
+    val firebaseApiKey = "AIzaSyD_u10Qb3lPqU8su03N0lV4MHZ7TeO0LGs"
 
     suspend fun firebaseSignInWithEmail(emailStr: String, passwordStr: String): UserAuthResult = withContext(Dispatchers.IO) {
         try {

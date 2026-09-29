@@ -712,6 +712,16 @@ fun SonaraAuthDialog(
             isAuthLoading = false
             if (e.statusCode == 12501) {
                 statusMessage = "Google Sign-In canceled"
+            } else if (e.statusCode == 10) {
+                val account = GoogleSignIn.getLastSignedInAccount(context)
+                if (account?.email != null) {
+                    viewModel.firebaseGoogleSignIn(account.email!!, account.idToken) { success, msg ->
+                        statusMessage = msg
+                        if (success) onDismiss()
+                    }
+                } else {
+                    statusMessage = "Google Sign-In Error Code 10 (DEVELOPER_ERROR): SHA-1 key fingerprint or Web Client ID missing in Google/Firebase Console for com.sonara.app."
+                }
             } else {
                 val account = GoogleSignIn.getLastSignedInAccount(context)
                 if (account?.email != null) {
@@ -795,7 +805,7 @@ fun SonaraAuthDialog(
                                 val webClientIdResId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
                                 if (webClientIdResId != 0) {
                                     val webClientId = context.getString(webClientIdResId)
-                                    if (webClientId.isNotBlank()) {
+                                    if (webClientId.isNotBlank() && webClientId != "YOUR_WEB_CLIENT_ID_HERE") {
                                         gsoBuilder.requestIdToken(webClientId)
                                     }
                                 }

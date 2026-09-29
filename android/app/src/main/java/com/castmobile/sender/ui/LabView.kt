@@ -22,6 +22,26 @@ import java.util.Locale
 
 private data class ThemeOption(val mode: String, val label: String, val desc: String)
 
+private data class UserBreakdownItem(
+    val name: String,
+    val email: String,
+    val tracksCount: Int,
+    val userMB: Double,
+    val userCost: Double,
+    val sharePct: Double
+)
+
+private data class AdminStatsData(
+    val totalMB: Double,
+    val totalGB: Double,
+    val billableGB: Double,
+    val estCost: Double,
+    val totalUsers: Int,
+    val totalTracks: Int,
+    val pct: Int,
+    val userBreakdown: List<UserBreakdownItem>
+)
+
 @Composable
 fun LiquidLab(
     viewModel: MainViewModel,
@@ -488,6 +508,52 @@ fun LiquidLab(
                     }
 
                     val statsJson = viewModel.adminStatsJson
+                    val parsedStats = remember(statsJson) {
+                        if (statsJson.isNullOrBlank()) null
+                        else {
+                            runCatching {
+                                val root = JSONObject(statsJson)
+                                val summary = root.getJSONObject("summary")
+                                val totalMB = summary.optDouble("totalStorageMB", 0.0)
+                                val totalGB = summary.optDouble("totalStorageGB", 0.0)
+                                val billableGB = summary.optDouble("billableGB", 0.0)
+                                val estCost = summary.optDouble("totalEstimatedMonthlyCostUSD", 0.0)
+                                val totalUsers = summary.optInt("totalUsers", 0)
+                                val totalTracks = summary.optInt("totalTracks", 0)
+                                val pct = ((totalGB / 10.0) * 100).toInt().coerceIn(0, 100)
+
+                                val breakdownList = mutableListOf<UserBreakdownItem>()
+                                val breakdown = root.optJSONArray("userBreakdown")
+                                if (breakdown != null) {
+                                    val len = breakdown.length()
+                                    for (i in 0 until len) {
+                                        val u = breakdown.getJSONObject(i)
+                                        breakdownList.add(
+                                            UserBreakdownItem(
+                                                name = u.optString("displayName", "User"),
+                                                email = u.optString("email", "N/A"),
+                                                tracksCount = u.optInt("trackCount", 0),
+                                                userMB = u.optDouble("totalMB", 0.0),
+                                                userCost = u.optDouble("estimatedMonthlyCostUSD", 0.0),
+                                                sharePct = u.optDouble("sharePercentage", 0.0)
+                                            )
+                                        )
+                                    }
+                                }
+                                AdminStatsData(
+                                    totalMB = totalMB,
+                                    totalGB = totalGB,
+                                    billableGB = billableGB,
+                                    estCost = estCost,
+                                    totalUsers = totalUsers,
+                                    totalTracks = totalTracks,
+                                    pct = pct,
+                                    userBreakdown = breakdownList
+                                )
+                            }
+                        }
+                    }
+
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -524,112 +590,92 @@ fun LiquidLab(
 
                                 if (statsJson == null) {
                                     Text("Loading storage metrics...", color = muted, fontSize = 13.sp)
+                                } else if (parsedStats == null || parsedStats.isFailure) {
+                                    Text("Error parsing metrics: ${parsedStats?.exceptionOrNull()?.message ?: "Unknown error"}", color = Color(0xFFFF5252), fontSize = 12.sp)
                                 } else {
-                                    try {
-                                        val root = JSONObject(statsJson)
-                                        val summary = root.getJSONObject("summary")
-                                        val totalMB = summary.optDouble("totalStorageMB", 0.0)
-                                        val totalGB = summary.optDouble("totalStorageGB", 0.0)
-                                        val billableGB = summary.optDouble("billableGB", 0.0)
-                                        val estCost = summary.optDouble("totalEstimatedMonthlyCostUSD", 0.0)
-                                        val totalUsers = summary.optInt("totalUsers", 0)
-                                        val totalTracks = summary.optInt("totalTracks", 0)
-                                        val pct = ((totalGB / 10.0) * 100).toInt().coerceIn(0, 100)
-
-                                        // Usage Summary Cards
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    val stats = parsedStats.getOrThrow()
+                                    // Usage Summary Cards
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = bg,
+                                            border = BorderStroke(1.dp, line)
                                         ) {
-                                            Surface(
-                                                modifier = Modifier.weight(1f),
-                                                shape = RoundedCornerShape(14.dp),
-                                                color = bg,
-                                                border = BorderStroke(1.dp, line)
-                                            ) {
-                                                Column(modifier = Modifier.padding(12.dp)) {
-                                                    Text("TOTAL STORAGE", color = muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                    Text("${totalMB.toInt()} MB", color = text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                                    Text("$pct% of 10GB free limit", color = if (pct > 80) Color(0xFFFFB300) else muted, fontSize = 11.sp)
-                                                }
-                                            }
-
-                                            Surface(
-                                                modifier = Modifier.weight(1f),
-                                                shape = RoundedCornerShape(14.dp),
-                                                color = bg,
-                                                border = BorderStroke(1.dp, line)
-                                            ) {
-                                                Column(modifier = Modifier.padding(12.dp)) {
-                                                    Text("EST. MONTHLY COST", color = muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                    Text("$${String.format(Locale.US, "%.2f", estCost)}/mo", color = accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                                    Text("${billableGB.toFloat()} GB overage", color = muted, fontSize = 11.sp)
-                                                }
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Text("TOTAL STORAGE", color = muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("${stats.totalMB.toInt()} MB", color = text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                                Text("${stats.pct}% of 10GB free limit", color = if (stats.pct > 80) Color(0xFFFFB300) else muted, fontSize = 11.sp)
                                             }
                                         }
 
-                                        Spacer(Modifier.height(16.dp))
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = bg,
+                                            border = BorderStroke(1.dp, line)
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Text("EST. MONTHLY COST", color = muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("$${String.format(Locale.US, "%.2f", stats.estCost)}/mo", color = accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                                Text("${stats.billableGB.toFloat()} GB overage", color = muted, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
 
-                                        // Capacity Bar
-                                        Text("R2 Free Storage Quota (10 GB)", color = text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                        Spacer(Modifier.height(6.dp))
+                                    Spacer(Modifier.height(16.dp))
+
+                                    // Capacity Bar
+                                    Text("R2 Free Storage Quota (10 GB)", color = text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(line)
+                                    ) {
                                         Box(
                                             modifier = Modifier
+                                                .fillMaxWidth(stats.pct / 100f)
+                                                .fillMaxHeight()
+                                                .background(if (stats.pct > 90) Color(0xFFFF5252) else if (stats.pct > 70) Color(0xFFFFB300) else Color(0xFF00E676))
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(20.dp))
+                                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+                                    Spacer(Modifier.height(16.dp))
+
+                                    // Per-User Breakdown List
+                                    Text("User Storage Breakdown (${stats.totalUsers} Uploaders, ${stats.totalTracks} Tracks)", color = text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(12.dp))
+
+                                    val breakdown = stats.userBreakdown
+                                    val len = breakdown.size
+                                    for (i in 0 until len) {
+                                        val u = breakdown[i]
+                                        Row(
+                                            modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(8.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(line)
+                                                .padding(vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth(pct / 100f)
-                                                    .fillMaxHeight()
-                                                    .background(if (pct > 90) Color(0xFFFF5252) else if (pct > 70) Color(0xFFFFB300) else Color(0xFF00E676))
-                                            )
-                                        }
-
-                                        Spacer(Modifier.height(20.dp))
-                                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-                                        Spacer(Modifier.height(16.dp))
-
-                                        // Per-User Breakdown List
-                                        Text("User Storage Breakdown ($totalUsers Uploaders, $totalTracks Tracks)", color = text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                        Spacer(Modifier.height(12.dp))
-
-                                        val breakdown = root.optJSONArray("userBreakdown")
-                                        if (breakdown != null) {
-                                            val len = breakdown.length()
-                                            for (i in 0 until len) {
-                                                val u = breakdown.getJSONObject(i)
-                                                val name = u.optString("displayName", "User")
-                                                val email = u.optString("email", "N/A")
-                                                val tracksCount = u.optInt("trackCount", 0)
-                                                val userMB = u.optDouble("totalMB", 0.0)
-                                                val userCost = u.optDouble("estimatedMonthlyCostUSD", 0.0)
-                                                val sharePct = u.optDouble("sharePercentage", 0.0)
-
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(vertical = 6.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(name, color = text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                                        Text("$email • $tracksCount tracks", color = muted, fontSize = 11.sp)
-                                                    }
-                                                    Column(horizontalAlignment = Alignment.End) {
-                                                        Text("${userMB.toInt()} MB (${String.format(Locale.US, "%.1f", sharePct)}%)", color = text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                                        Text("$${String.format(Locale.US, "%.4f", userCost)}/mo", color = accent, fontSize = 11.sp)
-                                                    }
-                                                }
-                                                if (i < len - 1) {
-                                                    Spacer(Modifier.height(4.dp))
-                                                }
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(u.name, color = text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                Text("${u.email} • ${u.tracksCount} tracks", color = muted, fontSize = 11.sp)
+                                            }
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text("${u.userMB.toInt()} MB (${String.format(Locale.US, "%.1f", u.sharePct)}%)", color = text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                                Text("$${String.format(Locale.US, "%.4f", u.userCost)}/mo", color = accent, fontSize = 11.sp)
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        Text("Error parsing metrics: ${e.message}", color = Color(0xFFFF5252), fontSize = 12.sp)
+                                        if (i < len - 1) {
+                                            Spacer(Modifier.height(4.dp))
+                                        }
                                     }
                                 }
                             }
