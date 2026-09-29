@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth } from './firebaseAuth';
+import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
 import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, saveCachedCatalog } from './catalogUtils.js';
 
 /* -------------------------------------------------------------------------- */
@@ -818,13 +818,54 @@ function PageBanner({ id, title, subtitle }) {
   );
 }
 
-function AuthDialog({ mode, reason, hasAdmin, onClaimAdmin, onClose, onSignedIn, onModeChange }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+function UsernameDialog({ onComplete }) {
+  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const finish = (result) => onSignedIn(result.user);
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/profile`, {
+        method: 'PUT',
+        body: JSON.stringify({ username })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to save username.');
+      onComplete(data.profile);
+    } catch (saveError) {
+      setError(saveError?.message || 'Unable to save username.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-backdrop">
+      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="username-title">
+        <span className="auth-kicker">Personalize Sonara</span>
+        <h2 id="username-title">Choose your username</h2>
+        <p className="auth-reason">This name is tied to your account and must be unique.</p>
+        <form onSubmit={submit}>
+          <label className="auth-field"><span>Username</span><input type="text" value={username} onChange={(event) => setUsername(event.target.value)} minLength="2" maxLength="30" pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,29}" autoFocus required /></label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <button type="submit" className="btn btn-primary btn-wide" disabled={busy}>{busy ? 'Saving…' : 'Continue'}</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function AuthDialog({ mode, reason, hasAdmin, onClaimAdmin, onClose, onSignedIn, onModeChange }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const finish = (result) => onSignedIn(result.user, mode === 'register' ? username.trim() : '');
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
@@ -875,6 +916,7 @@ function AuthDialog({ mode, reason, hasAdmin, onClaimAdmin, onClose, onSignedIn,
         <form onSubmit={submit}>
           <label className="auth-field"><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
           <label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength="6" required /></label>
+          {mode === 'register' && <label className="auth-field"><span>Username</span><input type="text" value={username} onChange={(event) => setUsername(event.target.value)} minLength="2" maxLength="30" pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,29}" required /></label>}
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button type="submit" className="btn btn-primary btn-wide" disabled={busy || !isFirebaseConfigured}>{busy ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Sign in'}</button>
         </form>
@@ -1169,6 +1211,8 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
   const [authReason, setAuthReason] = useState('Sign in to unlock this feature.');
+  const [usernameOpen, setUsernameOpen] = useState(false);
+  const [pendingAdminClaim, setPendingAdminClaim] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState([]);
   const [libraryHydrated, setLibraryHydrated] = useState(false);
 
@@ -1201,12 +1245,12 @@ export default function App() {
     })();
   }, [authUser]);
 
-  const handleClaimAdmin = async () => {
+  const claimAdminForUser = useCallback(async (user) => {
     try {
       const res = await authenticatedJsonRequest(`${apiBase}/admin/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: authUser?.email || 'admin@sonara.app' })
+        body: JSON.stringify({ email: user?.email || 'admin@sonara.app', displayName: user?.displayName || '' })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Unable to claim admin account.');
@@ -1218,6 +1262,16 @@ export default function App() {
     } catch (err) {
       setNotice(err.message || 'Failed to claim admin account.');
     }
+  }, []);
+
+  const handleClaimAdmin = async () => {
+    if (!authUser) {
+      setPendingAdminClaim(true);
+      setAuthMode('signin');
+      setAuthReason('Sign in to claim the one-time admin account.');
+      return;
+    }
+    await claimAdminForUser(authUser);
   };
 
   const loadAdminStats = useCallback(async () => {
@@ -1240,13 +1294,32 @@ export default function App() {
     }
   }, [view, isAdmin, loadAdminStats]);
 
-  const handleAuthSuccess = useCallback((user) => {
+  const handleAuthSuccess = useCallback(async (user, requestedUsername = '') => {
     setAuthUser(user);
     setAuthOpen(false);
     setAuthMode('signin');
     setAuthReason('Sign in to unlock this feature.');
-    if (user) setNotice(`Welcome back, ${getUserDisplayName(user)}.`);
-  }, []);
+    if (!user) return;
+    if (requestedUsername) {
+      try {
+        const response = await authenticatedJsonRequest(`${apiBase}/me/profile`, { method: 'PUT', body: JSON.stringify({ username: requestedUsername }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to save username.');
+        await updateUserProfile(user, data.profile.username);
+        setAuthUser({ ...user, displayName: data.profile.username });
+        setUsernameOpen(false);
+      } catch (error) {
+        setNotice(error.message || 'Unable to save username.');
+        setUsernameOpen(true);
+      }
+    } else {
+      setNotice(`Welcome back, ${getUserDisplayName(user)}.`);
+    }
+    if (pendingAdminClaim) {
+      setPendingAdminClaim(false);
+      await claimAdminForUser(user);
+    }
+  }, [claimAdminForUser, pendingAdminClaim]);
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -1298,6 +1371,24 @@ export default function App() {
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
 
   useEffect(() => subscribeToAuth(setAuthUser), []);
+
+  useEffect(() => {
+    if (!authUser) return undefined;
+    let active = true;
+    authenticatedJsonRequest(`${apiBase}/me/profile`)
+      .then((response) => response.json().then((data) => ({ response, data })))
+      .then(({ response, data }) => {
+        if (!active || !response.ok) return;
+        if (data.profile?.username) {
+          updateUserProfile(authUser, data.profile.username).catch(() => {});
+          setAuthUser({ ...authUser, displayName: data.profile.username });
+        } else {
+          setUsernameOpen(true);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [authUser]);
 
   useEffect(() => {
     let active = true;
@@ -2865,6 +2956,13 @@ export default function App() {
           onModeChange={setAuthMode}
         />
       )}
+
+      {usernameOpen && <UsernameDialog onComplete={async (profile) => {
+        await updateUserProfile(authUser, profile.username);
+        setAuthUser({ ...authUser, displayName: profile.username });
+        setUsernameOpen(false);
+        setNotice(`Welcome to Sonara, ${profile.username}.`);
+      }} />}
 
       {notice && (
         <div className="toast" role="status">

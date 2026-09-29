@@ -42,6 +42,12 @@ export async function createAccountWithEmail(email, password) {
   return auth.createUserWithEmailAndPassword(email, password);
 }
 
+export async function updateUserProfile(user, displayName) {
+  if (!user?.updateProfile) return user;
+  await user.updateProfile({ displayName });
+  return user;
+}
+
 export async function signOutUser() {
   if (auth) await auth.signOut();
 }

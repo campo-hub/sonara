@@ -18,6 +18,7 @@ import { upsertTrack, listTracks, storageMode, isMongoConfigured } from './catal
 import { buildEmptyLibraryPayload } from './libraryUtils.js';
 import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
 import { getAdminConfig, claimAdmin, isAdminUser } from './adminStore.js';
+import { getUserProfile, saveUserProfile, validateUsername } from './userStore.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -379,6 +380,32 @@ app.put('/api/me/library', async (req, res) => {
   } catch (error) {
     console.error('[library] write failed', error);
     res.status(500).json({ message: 'Unable to sync your library right now.' });
+  }
+});
+
+app.get('/api/me/profile', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Sign in to load your profile.' });
+    const profile = await getUserProfile(req.user.uid);
+    res.json({ profile });
+  } catch (error) {
+    console.error('[profile] read failed', error);
+    res.status(500).json({ message: 'Unable to load your profile right now.' });
+  }
+});
+
+app.put('/api/me/profile', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Sign in to save your profile.' });
+    const username = String(req.body?.username || '').trim();
+    const validationError = validateUsername(username);
+    if (validationError) return res.status(400).json({ message: validationError });
+    const profile = await saveUserProfile({ uid: req.user.uid, email: req.user.email, username });
+    res.json({ profile });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ message: 'That username is already in use.' });
+    console.error('[profile] write failed', error);
+    res.status(500).json({ message: 'Unable to save your profile right now.' });
   }
 });
 
