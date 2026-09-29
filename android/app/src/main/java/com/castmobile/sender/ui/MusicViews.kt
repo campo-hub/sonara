@@ -509,6 +509,10 @@ fun TrackRow(
                 modifier = Modifier.size(18.dp)
             )
         }
+
+        IconButton(onClick = onShowOptions, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Add, contentDescription = "Add to playlist", tint = mutedColor, modifier = Modifier.size(19.dp))
+        }
     }
 
     Box(

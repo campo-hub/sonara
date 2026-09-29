@@ -57,8 +57,7 @@ fun LiquidLab(
     val accent = themeViewModel.getAccentColor(isDark)
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var userNameInput by remember { mutableStateOf(themeViewModel.userName) }
-    var apiUrlInput by remember { mutableStateOf(viewModel.apiBaseUrl) }
+    var userNameInput by remember { mutableStateOf(viewModel.username ?: "") }
 
     LazyColumn(
         modifier = Modifier
@@ -359,83 +358,34 @@ fun LiquidLab(
                             border = BorderStroke(1.dp, line)
                         ) {
                             Column(modifier = Modifier.padding(20.dp)) {
-                                // User Name Setting
-                                Text("Listener name", color = text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                // Account username
+                                Text("Username", color = text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(4.dp))
-                                Text("Shown in greetings and player headers", color = muted, fontSize = 12.sp)
+                                Text("Shared across Sonara web and Android", color = muted, fontSize = 12.sp)
                                 Spacer(Modifier.height(10.dp))
 
                                 OutlinedTextField(
                                     value = userNameInput,
                                     onValueChange = {
                                         userNameInput = it
-                                        themeViewModel.updateUserName(it)
                                     },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp)
                                 )
 
-                                Spacer(Modifier.height(20.dp))
-                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-                                Spacer(Modifier.height(16.dp))
-
-                                // Render Backend URL Setting
-                                Text("Render Cloud API", color = text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(4.dp))
-                                Text("Connects the Android app to the live Render web backend", color = muted, fontSize = 12.sp)
                                 Spacer(Modifier.height(10.dp))
-
-                                OutlinedTextField(
-                                    value = apiUrlInput,
-                                    onValueChange = { apiUrlInput = it },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    placeholder = { Text("https://sonara-xgmr.onrender.com/api", color = muted) }
-                                )
-
-                                Spacer(Modifier.height(10.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                Button(
+                                    onClick = { viewModel.saveUsername(userNameInput) },
+                                    enabled = userNameInput.trim().length >= 2,
+                                    colors = ButtonDefaults.buttonColors(containerColor = accent),
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateApiBaseUrl(apiUrlInput)
-                                            if (!viewModel.isOnlineMode) {
-                                                viewModel.toggleOnlineMode(true)
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = accent),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Text("Save & Connect", color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (viewModel.isOnlineMode && viewModel.onlineError == null) Color(0xFF00E676)
-                                                    else Color(0xFFFF5252)
-                                                )
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = if (viewModel.isOnlineMode) {
-                                                if (viewModel.isOnlineLoading) "Connecting..."
-                                                else if (viewModel.onlineError != null) "Error"
-                                                else "Online"
-                                            } else "Offline",
-                                            color = muted,
-                                            fontSize = 12.sp
-                                        )
-                                    }
+                                    Text("Save username", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                                viewModel.usernameError?.let { error ->
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(error, color = Color(0xFFD85A4A), fontSize = 12.sp)
                                 }
 
                                 Spacer(Modifier.height(20.dp))

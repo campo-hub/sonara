@@ -496,6 +496,32 @@ strong {
   display: grid;
   gap: 12px;
 }
+.username-setting-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: min(100%, 280px);
+}
+.username-setting-control input {
+  width: min(100%, 190px);
+  height: 38px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+.username-setting-control input:focus {
+  border-color: var(--ink);
+  outline: 0;
+}
+.username-setting-error {
+  flex-basis: 100%;
+  color: var(--danger);
+  text-align: right;
+}
 
 .auth-field {
   display: grid;
@@ -1679,8 +1705,6 @@ strong {
 .tl-dots {
   flex: 1;
   min-width: 12px;
-  border-bottom: 2px dotted var(--faint);
-  opacity: 0.7;
 }
 
 .wave {

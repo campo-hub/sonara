@@ -232,6 +232,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         get() = _targetPlaylistForAdding.value
         set(value) { _targetPlaylistForAdding.value = value }
 
+    var pendingPlaylistTrack by mutableStateOf<Track?>(null)
+
     private var lastPlayedTrackId: Long
         get() = prefs.getLong("last_played_track_id", -1L)
         set(value) = prefs.edit().putLong("last_played_track_id", value).apply()
@@ -277,11 +279,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var onlineError by mutableStateOf<String?>(null)
         private set
 
+    var uploadStatus by mutableStateOf<String?>(null)
+        private set
+
     var idToken by mutableStateOf(prefs.getString("id_token", null))
         private set
 
     var userEmail by mutableStateOf(prefs.getString("user_email", null))
         private set
+
+    var username by mutableStateOf(prefs.getString("username", null))
+        private set
+
+    var showUsernamePrompt by mutableStateOf(false)
+        private set
+
+    var usernameError by mutableStateOf<String?>(null)
 
     var hasAdmin by mutableStateOf(true)
         private set
@@ -361,15 +374,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putString("user_email", email)
             .putString("id_token", token)
             .apply()
-        if (token != null && isOnlineMode) {
+        if (token != null) {
+            isOnlineMode = true
+            prefs.edit().putBoolean("is_online_mode", true).apply()
             fetchUserLibraryFromCloud()
+            fetchUserProfileFromCloud()
             checkIsAdmin()
+            loadOnlineCatalog()
         } else {
+            username = null
             isAdmin = false
+            showUsernamePrompt = false
+            prefs.edit().remove("username").remove("user_email").remove("id_token").apply()
         }
     }
 
-    fun firebaseSignIn(emailStr: String, passStr: String, isRegister: Boolean, onResult: (Boolean, String) -> Unit) {
+    fun firebaseSignIn(emailStr: String, passStr: String, isRegister: Boolean, usernameStr: String = "", onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val result = if (isRegister) {
                 apiClient.firebaseSignUpWithEmail(emailStr, passStr)
@@ -378,7 +398,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (result.success && result.token != null && result.email != null) {
                 setUserAuth(result.email, result.token)
-                onResult(true, if (isRegister) "Account created!" else "Signed in!")
+                val requestedUsername = if (isRegister) usernameStr else result.displayName.orEmpty()
+                if (requestedUsername.isNotBlank()) {
+                    saveUsername(requestedUsername) { success, message ->
+                        onResult(success, if (success) "Account created!" else message)
+                    }
+                } else {
+                    onResult(true, if (isRegister) "Account created!" else "Signed in!")
+                }
             } else {
                 onResult(false, result.errorMessage ?: "Authentication failed")
             }
@@ -390,9 +417,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = apiClient.firebaseSignInWithGoogle(googleEmail, googleToken)
             if (result.success && result.token != null && result.email != null) {
                 setUserAuth(result.email, result.token)
-                onResult(true, "Signed in with Google!")
+                if (!result.displayName.isNullOrBlank()) {
+                    saveUsername(result.displayName) { success, message ->
+                        onResult(success, if (success) "Signed in with Google!" else message)
+                    }
+                } else {
+                    onResult(true, "Signed in with Google!")
+                }
             } else {
                 onResult(false, result.errorMessage ?: "Google auth failed")
+            }
+        }
+    }
+
+    fun fetchUserProfileFromCloud() {
+        val token = idToken ?: return
+        viewModelScope.launch {
+            val response = apiClient.fetchUserProfile(apiBaseUrl, token) ?: return@launch
+            try {
+                val profile = JSONObject(response).optJSONObject("profile")
+                val savedUsername = profile?.optString("username").orEmpty()
+                if (savedUsername.isBlank()) {
+                    showUsernamePrompt = true
+                } else {
+                    username = savedUsername
+                    prefs.edit().putString("username", savedUsername).apply()
+                    showUsernamePrompt = false
+                }
+            } catch (_: Exception) {
+                // Keep the existing account usable if profile data is unavailable.
+            }
+        }
+    }
+
+    fun saveUsername(value: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        val token = idToken
+        val clean = value.trim()
+        if (token.isNullOrBlank()) {
+            onResult(false, "Sign in is required.")
+            return
+        }
+        viewModelScope.launch {
+            val result = apiClient.saveUsername(apiBaseUrl, token, clean)
+            if (result.success && !result.username.isNullOrBlank()) {
+                username = result.username
+                usernameError = null
+                showUsernamePrompt = false
+                prefs.edit().putString("username", result.username).apply()
+                onResult(true, "Username saved.")
+            } else {
+                usernameError = result.errorMessage ?: "Unable to save username."
+                onResult(false, usernameError ?: "Unable to save username.")
             }
         }
     }
@@ -467,7 +542,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchUserLibraryFromCloud() {
         val token = idToken ?: return
-        if (!isOnlineMode) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val responseStr = apiClient.fetchUserLibrary(apiBaseUrl, token) ?: return@launch
@@ -476,13 +550,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val prefsObj = json.getJSONObject("preferences")
                     if (prefsObj.has("liked")) {
                         val likedArray = prefsObj.getJSONArray("liked")
-                        val set = mutableSetOf<Long>()
+                        val remoteIds = mutableSetOf<String>()
                         for (i in 0 until likedArray.length()) {
-                            set.add(likedArray.getLong(i))
+                            remoteIds.add(likedArray.optString(i))
                         }
+                        val set = allTracks.filter { remoteIds.contains(it.remoteId ?: it.id.toString()) }.map { it.id }.toSet()
                         withContext(Dispatchers.Main) {
                             favoriteTracks.value = set
                             prefs.edit().putStringSet("favorites", set.map { it.toString() }.toSet()).apply()
+                            updateUserPlaylistsTracks()
+                        }
+                    }
+                    val playlistsArray = json.optJSONArray("playlists")
+                    if (playlistsArray != null) {
+                        val playlistsJson = JSONObject()
+                        for (i in 0 until playlistsArray.length()) {
+                            val playlist = playlistsArray.optJSONObject(i) ?: continue
+                            val name = playlist.optString("name").trim()
+                            if (name.isBlank() || name == "Favorites") continue
+                            val trackIds = JSONArray()
+                            val tracks = playlist.optJSONArray("tracks") ?: JSONArray()
+                            for (j in 0 until tracks.length()) trackIds.put(tracks.optString(j))
+                            playlistsJson.put(name, trackIds)
+                        }
+                        withContext(Dispatchers.Main) {
+                            prefs.edit().putString("playlists", playlistsJson.toString()).apply()
                             updateUserPlaylistsTracks()
                         }
                     }
@@ -499,10 +591,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val favList = favoriteTracks.value.toList()
-                val playlistMap = mutableMapOf<String, List<Long>>()
+                val playlistMap = mutableMapOf<String, List<String>>()
                 for (p in userPlaylists) {
                     if (p.name != "Favorites") {
-                        playlistMap[p.name] = p.tracks.map { it.id }
+                        playlistMap[p.name] = p.tracks.map { it.remoteId ?: it.id.toString() }
                     }
                 }
 
@@ -532,17 +624,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun uploadFilesToOnlineServer(context: Context, fileUris: List<android.net.Uri>, onResult: (Boolean, String) -> Unit) {
-        if (!isOnlineMode) return
+        if (!isOnlineMode) {
+            onResult(false, "Go online before uploading music.")
+            return
+        }
         viewModelScope.launch {
             isOnlineLoading = true
+            uploadStatus = "Uploading ${fileUris.size} track${if (fileUris.size == 1) "" else "s"}..."
             try {
                 val uploaded: List<Track> = apiClient.uploadAudioFiles(apiBaseUrl, idToken, context, fileUris)
                 _remoteTracks.value = uploaded + _remoteTracks.value
                 allTracks = _remoteTracks.value
                 loadOnlineCatalog()
-                onResult(true, "${uploaded.size} tracks uploaded successfully.")
+                val message = "${uploaded.size} tracks uploaded successfully."
+                uploadStatus = message
+                onResult(true, message)
             } catch (e: Exception) {
-                onResult(false, e.message ?: "Upload failed.")
+                val message = e.message ?: "Upload failed."
+                uploadStatus = message
+                onResult(false, message)
             } finally {
                 isOnlineLoading = false
             }
@@ -611,12 +711,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (name == "Favorites") continue
                 
                 val trackIdsArray = json.getJSONArray(name)
-                val trackIds = mutableSetOf<Long>()
+                val trackIds = mutableSetOf<String>()
                 for (i in 0 until trackIdsArray.length()) {
-                    trackIds.add(trackIdsArray.getLong(i))
+                    trackIds.add(trackIdsArray.optString(i))
                 }
                 
-                val tracksList = allTracks.filter { trackIds.contains(it.id) }
+                val tracksList = allTracks.filter { trackIds.contains(it.remoteId ?: it.id.toString()) }
                 playlists.add(Folder(
                     name = name,
                     trackCount = tracksList.size,
@@ -639,6 +739,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 json.put(name, JSONArray())
                 prefs.edit().putString("playlists", json.toString()).apply()
                 updateUserPlaylistsTracks()
+                syncUserLibraryToCloud()
             }
         } catch (e: Exception) {}
     }
@@ -660,6 +761,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 json.put(playlistName, array)
                 prefs.edit().putString("playlists", json.toString()).apply()
                 updateUserPlaylistsTracks()
+                syncUserLibraryToCloud()
             }
         } catch (e: Exception) {}
     }
@@ -678,6 +780,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             json.put(playlistName, newArray)
             prefs.edit().putString("playlists", json.toString()).apply()
             updateUserPlaylistsTracks()
+            syncUserLibraryToCloud()
             
             if (currentFolder?.name == playlistName) {
                 currentFolder = userPlaylists.find { it.name == playlistName }
@@ -1144,6 +1247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             json.put(playlistName, array)
             prefs.edit().putString("playlists", json.toString()).apply()
             updateUserPlaylistsTracks()
+            syncUserLibraryToCloud()
             deselectAll()
             targetPlaylistForAdding = null
         } catch (e: Exception) {}

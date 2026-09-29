@@ -12,7 +12,8 @@ data class Track(
     val albumArtUri: Uri? = null,
     val folderName: String = "Internal Storage",
     val dateAdded: Long = 0L,
-    val size: Long = 0L
+    val size: Long = 0L,
+    val remoteId: String? = null
 )
 
 data class Folder(

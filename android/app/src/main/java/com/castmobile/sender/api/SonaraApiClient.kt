@@ -39,6 +39,12 @@ data class UserAuthResult(
     val errorMessage: String? = null
 )
 
+data class UsernameResult(
+    val success: Boolean,
+    val username: String? = null,
+    val errorMessage: String? = null
+)
+
 class SonaraApiClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -66,7 +72,7 @@ class SonaraApiClient {
             if (response.isSuccessful && jsonObj.has("idToken")) {
                 val token = jsonObj.get("idToken").asString
                 val userEmail = jsonObj.get("email").asString
-                UserAuthResult(success = true, token = token, email = userEmail)
+                UserAuthResult(success = true, token = token, email = userEmail, displayName = jsonObj.get("displayName")?.asString)
             } else {
                 val errorMsg = if (jsonObj.has("error")) {
                     jsonObj.getAsJsonObject("error").get("message").asString
@@ -126,7 +132,7 @@ class SonaraApiClient {
                 if (response.isSuccessful && jsonObj.has("idToken")) {
                     val token = jsonObj.get("idToken").asString
                     val email = if (jsonObj.has("email")) jsonObj.get("email").asString else googleEmail
-                    return@withContext UserAuthResult(success = true, token = token, email = email)
+                    return@withContext UserAuthResult(success = true, token = token, email = email, displayName = jsonObj.get("displayName")?.asString)
                 }
             }
             val result = firebaseSignInWithEmail(googleEmail, "GoogleAuthSecret2025!")
@@ -275,7 +281,8 @@ class SonaraApiClient {
                         contentUri = Uri.parse(url),
                         albumArtUri = if (cover != null && cover.trim().isNotEmpty()) Uri.parse(cover) else null,
                         folderName = if (albumStr.isNotBlank() && albumStr != "Singles") albumStr else "Sonara Cloud",
-                        dateAdded = System.currentTimeMillis() - i * 1000L
+                        dateAdded = System.currentTimeMillis() - i * 1000L,
+                        remoteId = rawId
                     )
                 )
             }
@@ -297,6 +304,35 @@ class SonaraApiClient {
             response.body?.string()
         } else {
             null
+        }
+    }
+
+    suspend fun fetchUserProfile(apiBaseUrl: String, idToken: String): String? = withContext(Dispatchers.IO) {
+        val targetUrl = buildEndpointUrl(apiBaseUrl, "/me/profile")
+        val request = Request.Builder().url(targetUrl).get().addHeader("Authorization", "Bearer $idToken").build()
+        val response = client.newCall(request).execute()
+        if (response.isSuccessful) response.body?.string() else null
+    }
+
+    suspend fun saveUsername(apiBaseUrl: String, idToken: String, username: String): UsernameResult = withContext(Dispatchers.IO) {
+        try {
+            val targetUrl = buildEndpointUrl(apiBaseUrl, "/me/profile")
+            val payload = JsonObject().apply { addProperty("username", username.trim()) }
+            val request = Request.Builder()
+                .url(targetUrl)
+                .put(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .addHeader("Authorization", "Bearer $idToken")
+                .addHeader("Content-Type", "application/json")
+                .build()
+            val response = client.newCall(request).execute()
+            val body = gson.fromJson(response.body?.string() ?: "{}", JsonObject::class.java)
+            if (response.isSuccessful && body.has("profile")) {
+                UsernameResult(true, body.getAsJsonObject("profile").get("username")?.asString)
+            } else {
+                UsernameResult(false, errorMessage = body.get("message")?.asString ?: "Unable to save username.")
+            }
+        } catch (error: Exception) {
+            UsernameResult(false, errorMessage = error.message ?: "Unable to save username.")
         }
     }
 
@@ -370,7 +406,8 @@ class SonaraApiClient {
                         contentUri = Uri.parse(url),
                         albumArtUri = if (cover != null && cover.trim().isNotEmpty()) Uri.parse(cover) else null,
                         folderName = "Uploads",
-                        dateAdded = System.currentTimeMillis()
+                        dateAdded = System.currentTimeMillis(),
+                        remoteId = rawId
                     )
                 )
             }

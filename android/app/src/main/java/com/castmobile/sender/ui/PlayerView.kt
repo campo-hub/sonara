@@ -31,7 +31,8 @@ import com.sonara.app.model.Track
 fun LiquidPlayer(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
-    systemDark: Boolean
+    systemDark: Boolean,
+    onAddTrack: (Track) -> Unit
 ) {
     val track = viewModel.currentTrack ?: return
     val isDark = themeViewModel.isDark(systemDark)
@@ -190,6 +191,10 @@ fun LiquidPlayer(
                                 tint = if (isFavorite) accent else text,
                                 modifier = Modifier.size(24.dp)
                             )
+                        }
+
+                        IconButton(onClick = { onAddTrack(track) }, modifier = Modifier.size(42.dp)) {
+                            Icon(Icons.Default.Add, contentDescription = "Add to playlist", tint = text, modifier = Modifier.size(24.dp))
                         }
 
                         DjButton(

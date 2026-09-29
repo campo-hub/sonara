@@ -405,7 +405,8 @@ fun WaveformView(
 fun LiquidNavigation(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
-    systemDark: Boolean
+    systemDark: Boolean,
+    onAddTrack: (Track) -> Unit
 ) {
     val current = viewModel.currentTrack
     val isDark = themeViewModel.isDark(systemDark)
@@ -423,7 +424,8 @@ fun LiquidNavigation(
                 viewModel = viewModel,
                 themeViewModel = themeViewModel,
                 isDark = isDark,
-                onClick = { viewModel.showFullPlayer = true }
+                onClick = { viewModel.showFullPlayer = true },
+                onAddTrack = onAddTrack
             )
         }
 
@@ -447,7 +449,8 @@ fun DeckPlayer(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
     isDark: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAddTrack: (Track) -> Unit
 ) {
     val accent = themeViewModel.getAccentColor(isDark)
     val rawProgress = if (viewModel.duration > 0) viewModel.currentPosition.toFloat() / viewModel.duration else 0f
@@ -527,6 +530,10 @@ fun DeckPlayer(
                         tint = SonaraDesign.DeckFg,
                         modifier = Modifier.size(22.dp)
                     )
+                }
+
+                IconButton(onClick = { onAddTrack(track) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = "Add to playlist", tint = SonaraDesign.DeckFg, modifier = Modifier.size(20.dp))
                 }
             }
 
@@ -677,6 +684,7 @@ fun SonaraAuthDialog(
 ) {
     var emailInput by remember { mutableStateOf(viewModel.userEmail ?: "") }
     var passwordInput by remember { mutableStateOf("") }
+    var usernameInput by remember { mutableStateOf("") }
     var isRegisterMode by remember { mutableStateOf(false) }
     var isAuthLoading by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
@@ -720,7 +728,7 @@ fun SonaraAuthDialog(
                         if (success) onDismiss()
                     }
                 } else {
-                    statusMessage = "Google Sign-In Error Code 10 (DEVELOPER_ERROR): SHA-1 key fingerprint or Web Client ID missing in Google/Firebase Console for com.sonara.app."
+                    statusMessage = "Google Sign-In Error Code 10 (DEVELOPER_ERROR): SHA-1 key fingerprint or Web Client ID missing in Google/Firebase Console for ${context.packageName}."
                 }
             } else {
                 val account = GoogleSignIn.getLastSignedInAccount(context)
@@ -753,7 +761,7 @@ fun SonaraAuthDialog(
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (viewModel.userEmail != null) {
                     Text(
-                        text = "Signed in as ${viewModel.userEmail}",
+                        text = "Signed in as ${viewModel.username ?: viewModel.userEmail}",
                         color = text,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -888,21 +896,33 @@ fun SonaraAuthDialog(
                         shape = RoundedCornerShape(12.dp)
                     )
 
+                    if (isRegisterMode) {
+                        OutlinedTextField(
+                            value = usernameInput,
+                            onValueChange = { usernameInput = it },
+                            label = { Text("Username", color = muted) },
+                            supportingText = { Text("2-30 letters, numbers, dots, dashes, or underscores", color = muted, fontSize = 11.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
                     if (statusMessage.isNotBlank()) {
                         Text(statusMessage, color = accent, fontSize = 12.sp)
                     }
 
                     Button(
                         onClick = {
-                            if (emailInput.isNotBlank() && passwordInput.length >= 6) {
+                            if (emailInput.isNotBlank() && passwordInput.length >= 6 && (!isRegisterMode || usernameInput.trim().length >= 2)) {
                                 isAuthLoading = true
-                                viewModel.firebaseSignIn(emailInput.trim(), passwordInput, isRegisterMode) { success, msg ->
+                                viewModel.firebaseSignIn(emailInput.trim(), passwordInput, isRegisterMode, usernameInput.trim()) { success, msg ->
                                     isAuthLoading = false
                                     statusMessage = msg
                                     if (success) onDismiss()
                                 }
                             } else {
-                                statusMessage = "Please enter valid email & password (6+ chars)"
+                                statusMessage = if (isRegisterMode) "Enter an email, a 6+ character password, and a username." else "Please enter valid email & password (6+ chars)"
                             }
                         },
                         enabled = !isAuthLoading,
@@ -935,6 +955,47 @@ fun SonaraAuthDialog(
             TextButton(onClick = onDismiss) {
                 Text("Close", color = muted)
             }
+        }
+    )
+}
+
+@Composable
+fun UsernamePrompt(
+    viewModel: MainViewModel,
+    themeViewModel: ThemeViewModel,
+    systemDark: Boolean
+) {
+    val isDark = themeViewModel.isDark(systemDark)
+    val paper = if (isDark) SonaraDesign.DarkPaper else SonaraDesign.LightPaper
+    val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
+    val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
+    val accent = themeViewModel.getAccentColor(isDark)
+    var input by remember { mutableStateOf(viewModel.username ?: "") }
+
+    AlertDialog(
+        onDismissRequest = {},
+        containerColor = paper,
+        title = { Text("Choose your username", color = text, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("This name is tied to your account and shared across Sonara web and Android.", color = muted, fontSize = 13.sp)
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; viewModel.usernameError = null },
+                    label = { Text("Username") },
+                    singleLine = true,
+                    isError = viewModel.usernameError != null,
+                    supportingText = { Text(viewModel.usernameError ?: "2-30 characters; letters, numbers, dots, dashes, or underscores", color = muted, fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { viewModel.saveUsername(input) },
+                enabled = input.trim().length >= 2,
+                colors = ButtonDefaults.buttonColors(containerColor = accent)
+            ) { Text("Continue", color = Color.White) }
         }
     )
 }

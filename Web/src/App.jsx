@@ -1212,6 +1212,9 @@ export default function App() {
   const [authMode, setAuthMode] = useState('signin');
   const [authReason, setAuthReason] = useState('Sign in to unlock this feature.');
   const [usernameOpen, setUsernameOpen] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState('');
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const [usernameError, setUsernameError] = useState('');
   const [pendingAdminClaim, setPendingAdminClaim] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState([]);
   const [libraryHydrated, setLibraryHydrated] = useState(false);
@@ -1371,6 +1374,35 @@ export default function App() {
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
 
   useEffect(() => subscribeToAuth(setAuthUser), []);
+  useEffect(() => {
+    setUsernameDraft(authUser ? getUserDisplayName(authUser) : '');
+    setUsernameError('');
+  }, [authUser]);
+
+  const saveUsernameFromSettings = async () => {
+    if (!authUser) {
+      setAuthReason('Sign in to edit your username.');
+      setAuthOpen(true);
+      return;
+    }
+    setUsernameSaving(true);
+    setUsernameError('');
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/me/profile`, {
+        method: 'PUT',
+        body: JSON.stringify({ username: usernameDraft.trim() })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to save username.');
+      await updateUserProfile(authUser, data.profile.username);
+      setAuthUser({ ...authUser, displayName: data.profile.username });
+      setNotice('Username updated.');
+    } catch (error) {
+      setUsernameError(error.message || 'Unable to save username.');
+    } finally {
+      setUsernameSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!authUser) return undefined;
@@ -2587,6 +2619,29 @@ export default function App() {
 
       {labTab === 'settings' && (
         <div className="info-box settings-box">
+          <div className="setting-row username-setting">
+            <div>
+              <strong>Username</strong>
+              <span>Shown across Sonara and shared between web and Android.</span>
+            </div>
+            <div className="username-setting-control">
+              <input
+                type="text"
+                value={usernameDraft}
+                onChange={(event) => setUsernameDraft(event.target.value)}
+                minLength="2"
+                maxLength="30"
+                pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,29}"
+                placeholder={authUser ? 'Choose a username' : 'Sign in first'}
+                disabled={!authUser || usernameSaving}
+                aria-label="Username"
+              />
+              <button type="button" className="btn btn-compact" onClick={saveUsernameFromSettings} disabled={!authUser || usernameSaving || usernameDraft.trim().length < 2}>
+                {usernameSaving ? 'Saving…' : 'Save'}
+              </button>
+              {usernameError && <small className="username-setting-error" role="alert">{usernameError}</small>}
+            </div>
+          </div>
           <Toggle checked={prefs.waveforms} onChange={(value) => updatePrefs({ waveforms: value })} label="Show waveforms" description="Draws a small waveform along each line of a track list." />
           <Toggle checked={prefs.spin} onChange={(value) => updatePrefs({ spin: value })} label="Spinning records" description="Records turn while music plays. Off keeps everything still." />
           <Toggle checked={prefs.compact} onChange={(value) => updatePrefs({ compact: value })} label="Compact rows" description="Fits more tracks on screen at once." />

@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -71,7 +72,10 @@ class MainActivity : ComponentActivity() {
                                     animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
                                 ) + fadeOut()
                             ) {
-                                LiquidPlayer(viewModel, themeViewModel, systemDark)
+                                LiquidPlayer(viewModel, themeViewModel, systemDark) { track ->
+                                    viewModel.showFullPlayer = false
+                                    viewModel.pendingPlaylistTrack = track
+                                }
                             }
                         }
                     }
@@ -159,6 +163,19 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, sys
     var showAddToPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf<Track?>(null) }
     var previousTab by remember { mutableIntStateOf(1) }
+    val uploadPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.toggleOnlineMode(true)
+            viewModel.uploadFilesToOnlineServer(viewModel.getApplication(), uris) { _, _ -> }
+        }
+    }
+
+    LaunchedEffect(viewModel.pendingPlaylistTrack) {
+        viewModel.pendingPlaylistTrack?.let { track ->
+            showAddToPlaylistDialog = track
+            viewModel.pendingPlaylistTrack = null
+        }
+    }
 
     // Dialogs
     if (viewModel.showEqualizer) LiquidEqualizer(viewModel, themeViewModel) { viewModel.showEqualizer = false }
@@ -251,7 +268,7 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, sys
 
     Scaffold(
         bottomBar = {
-            LiquidNavigation(viewModel, themeViewModel, systemDark)
+            LiquidNavigation(viewModel, themeViewModel, systemDark) { track -> showAddToPlaylistDialog = track }
         },
         containerColor = Color.Transparent
     ) { padding ->
@@ -275,7 +292,13 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, sys
                     previousTab = tab
                 }
                 when (tab) {
-                    0 -> LiquidHome(viewModel, themeViewModel, systemDark) { viewModel.currentFolder = it }
+                    0 -> LiquidHome(
+                        viewModel,
+                        themeViewModel,
+                        systemDark,
+                        onUpload = { uploadPicker.launch(arrayOf("audio/*")) },
+                        onSignOut = { viewModel.setUserAuth(null, null) }
+                    ) { viewModel.currentFolder = it }
                     1 -> LiquidLibrary(viewModel, themeViewModel, systemDark, { showCreatePlaylistDialog = true }) { viewModel.currentFolder = it }
                     2 -> LiquidAllMusic(viewModel, themeViewModel, systemDark, { showAddToPlaylistDialog = it }) { track, list -> viewModel.playTrack(track, list) }
                     3 -> LiquidLab(viewModel, themeViewModel, systemDark)
@@ -289,6 +312,10 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, sys
                 }
             }
         }
+    }
+
+    if (viewModel.showUsernamePrompt) {
+        UsernamePrompt(viewModel, themeViewModel, systemDark)
     }
 }
 

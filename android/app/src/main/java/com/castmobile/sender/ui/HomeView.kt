@@ -30,6 +30,8 @@ fun LiquidHome(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
     systemDark: Boolean,
+    onUpload: () -> Unit,
+    onSignOut: () -> Unit,
     onFolderClick: (Folder) -> Unit
 ) {
     var showAuthDialog by remember { mutableStateOf(false) }
@@ -43,32 +45,15 @@ fun LiquidHome(
         )
     }
 
-    if (viewModel.isOnlineMode) {
-        if (viewModel.isOnlineLoading) {
-            // Full screen loading transition when switching to online
-            OnlineTransitionScreen(
-                themeViewModel = themeViewModel,
-                systemDark = systemDark
-            )
-        } else {
-            // Dedicated Online UI (web mobile experience, no offline media mixed in)
-            OnlineHomeView(
-                viewModel = viewModel,
-                themeViewModel = themeViewModel,
-                systemDark = systemDark,
-                onOpenAuth = { showAuthDialog = true },
-                onFolderClick = onFolderClick
-            )
-        }
-    } else {
-        // Dedicated Offline Local Studio UI
-        OfflineHomeView(
-            viewModel = viewModel,
-            themeViewModel = themeViewModel,
-            systemDark = systemDark,
-            onFolderClick = onFolderClick
-        )
-    }
+    OfflineHomeView(
+        viewModel = viewModel,
+        themeViewModel = themeViewModel,
+        systemDark = systemDark,
+        onUpload = onUpload,
+        onOpenAuth = { showAuthDialog = true },
+        onSignOut = onSignOut,
+        onFolderClick = onFolderClick
+    )
 }
 
 @Composable
@@ -172,10 +157,10 @@ private fun OnlineHomeView(
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.weight(1f).padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
@@ -473,6 +458,9 @@ private fun OfflineHomeView(
     viewModel: MainViewModel,
     themeViewModel: ThemeViewModel,
     systemDark: Boolean,
+    onUpload: () -> Unit,
+    onOpenAuth: () -> Unit,
+    onSignOut: () -> Unit,
     onFolderClick: (Folder) -> Unit
 ) {
     val isDark = themeViewModel.isDark(systemDark)
@@ -540,37 +528,64 @@ private fun OfflineHomeView(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "$timeGreeting, ${themeViewModel.userName}",
+                            text = if (viewModel.userEmail == null) timeGreeting else "$timeGreeting, ${viewModel.username ?: viewModel.userEmail?.substringBefore('@')}",
                             color = muted,
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // Online Mode Switch Button
-                    Surface(
-                        onClick = { viewModel.toggleOnlineMode(true) },
-                        shape = RoundedCornerShape(999.dp),
-                        color = paper,
-                        border = BorderStroke(1.dp, line)
+                    Column(
+                        modifier = Modifier.width(160.dp),
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = onUpload, modifier = Modifier.size(34.dp)) {
+                                Icon(Icons.Default.FileUpload, contentDescription = "Add music", tint = accent, modifier = Modifier.size(20.dp))
+                            }
+                            Surface(
+                                onClick = if (viewModel.userEmail == null) onOpenAuth else ({}),
+                                modifier = Modifier.widthIn(min = 66.dp, max = 112.dp),
+                                shape = RoundedCornerShape(999.dp),
+                                color = paper,
+                                border = BorderStroke(1.dp, line)
+                            ) {
+                                Text(
+                                    text = viewModel.username ?: viewModel.userEmail?.substringBefore('@') ?: "Sign in",
+                                    color = text,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp).fillMaxWidth()
+                                )
+                            }
+                            if (viewModel.userEmail != null) {
+                                IconButton(onClick = onSignOut, modifier = Modifier.size(34.dp)) {
+                                    Icon(Icons.Default.Logout, contentDescription = "Sign out", tint = muted, modifier = Modifier.size(19.dp))
+                                }
+                            }
+                        }
+                        Surface(
+                            onClick = { viewModel.toggleOnlineMode(!viewModel.isOnlineMode) },
+                            modifier = Modifier.width(112.dp),
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (viewModel.isOnlineMode) accent else paper,
+                            border = BorderStroke(1.dp, if (viewModel.isOnlineMode) accent else line)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Cloud,
-                                contentDescription = null,
-                                tint = accent,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "GO ONLINE",
-                                color = accent,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Cloud, contentDescription = null, tint = if (viewModel.isOnlineMode) Color.White else accent, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (viewModel.isOnlineMode) "Online" else "Go online", color = if (viewModel.isOnlineMode) Color.White else accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
                         }
                     }
                 }
