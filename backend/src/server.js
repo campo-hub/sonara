@@ -538,10 +538,13 @@ app.put('/api/me/library', async (req, res) => {
     const db = await getDb();
     const existing = await db.collection('userLibraries').findOne({ uid: req.user.uid });
     const merged = mergeLibraryData(existing?.data || buildEmptyLibraryPayload(), req.body || {});
+    const providedPreferences = req.body?.preferences && typeof req.body.preferences === 'object' ? req.body.preferences : {};
+    const currentPreferences = existing?.data?.preferences && typeof existing.data.preferences === 'object' ? existing.data.preferences : {};
+    const mergedPreferences = { ...currentPreferences, ...providedPreferences };
 
     await db.collection('userLibraries').updateOne(
       { uid: req.user.uid },
-      { $set: { uid: req.user.uid, data: merged, updatedAt: new Date() } },
+      { $set: { uid: req.user.uid, 'data.preferences': mergedPreferences, 'data.dailyMixes': merged.dailyMixes, 'data.mixHistory': merged.mixHistory, updatedAt: new Date() } },
       { upsert: true }
     );
 

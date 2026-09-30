@@ -31,6 +31,13 @@ test('mergeLibraryData preserves existing keys and only updates incoming prefere
   assert.deepEqual(merged.playlists, []);
 });
 
+test('partial preference updates do not erase appearance keys', () => {
+  const merged = mergeLibraryData({ preferences: { accent: '#2F4B6E', accentIntensity: 'immersive', spin: true } }, { preferences: { liked: ['new-track'] } });
+  assert.equal(merged.preferences.accent, '#2F4B6E');
+  assert.equal(merged.preferences.accentIntensity, 'immersive');
+  assert.equal(merged.preferences.spin, true);
+});
+
 test('empty library payload returns liked array even when no data exists', () => {
   const payload = buildEmptyLibraryPayload();
   assert.deepEqual(payload.preferences.liked, []);

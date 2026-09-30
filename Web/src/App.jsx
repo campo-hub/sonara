@@ -399,6 +399,18 @@ const loadPrefs = () => {
   }
 };
 
+const loadStoredPrefKeys = () => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return new Set(parsed && typeof parsed === 'object' ? Object.keys(parsed) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const SYNCABLE_PREF_KEYS = ['theme', 'accent', 'customAccent', 'accentIntensity', 'compact', 'spin', 'waveforms', 'volume'];
+
 function useMediaQuery(query) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
@@ -1248,6 +1260,8 @@ export default function App() {
   const [playHistory, setPlayHistory] = useState(loadPlayHistory);
   const [notice, setNotice] = useState('');
   const playProgressRef = useRef({ trackId: '', lastTime: 0, listenedSeconds: 0, qualified: false });
+  const localPrefKeysRef = useRef(loadStoredPrefKeys());
+  const dirtyPrefKeysRef = useRef(new Set());
   const [stageOpen, setStageOpen] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -1473,7 +1487,13 @@ export default function App() {
   const resolvedTheme = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme;
   const likedIds = useMemo(() => new Set(prefs.liked), [prefs.liked]);
 
-  const updatePrefs = useCallback((patch) => setPrefs((previous) => ({ ...previous, ...patch })), []);
+  const updatePrefs = useCallback((patch) => {
+    Object.keys(patch || {}).forEach((key) => {
+      localPrefKeysRef.current.add(key);
+      dirtyPrefKeysRef.current.add(key);
+    });
+    setPrefs((previous) => ({ ...previous, ...patch }));
+  }, []);
 
   const requireAuth = useCallback((reason) => {
     if (authUser) return true;
@@ -1594,30 +1614,43 @@ export default function App() {
 
   const toggleLike = useCallback((id) => {
     if (!requireAuth('Sign in to save favorites to your account.')) return;
+    localPrefKeysRef.current.add('liked');
+    dirtyPrefKeysRef.current.add('liked');
     setPrefs((previous) => ({
       ...previous,
       liked: previous.liked.includes(id) ? previous.liked.filter((item) => item !== id) : [...previous.liked, id]
     }));
   }, [requireAuth]);
 
+  const authUid = authUser?.uid || null;
+  const hydratedUidRef = useRef(null);
+
   useEffect(() => {
     let active = true;
-    if (!authUser) {
+    if (!authUid) {
       setLibraryHydrated(false);
       setUserPlaylists([]);
+      hydratedUidRef.current = null;
+      didInitialLibrarySync.current = false;
       return undefined;
     }
+    if (hydratedUidRef.current === authUid) return undefined;
+    hydratedUidRef.current = authUid;
     (async () => {
       try {
         const response = await authenticatedJsonRequest(`${apiBase}/me/library`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to load your library.');
         if (!active) return;
-        setPrefs((previous) => ({
-          ...previous,
-          ...(data.preferences || {}),
-          liked: Array.isArray(data.preferences?.liked) ? data.preferences.liked : previous.liked
-        }));
+        const cloudPreferences = data.preferences && typeof data.preferences === 'object' ? data.preferences : {};
+        setPrefs((previous) => {
+          const next = { ...previous };
+          SYNCABLE_PREF_KEYS.forEach((key) => {
+            if (!localPrefKeysRef.current.has(key) && Object.prototype.hasOwnProperty.call(cloudPreferences, key)) next[key] = cloudPreferences[key];
+          });
+          next.liked = [...new Set([...(previous.liked || []), ...(Array.isArray(cloudPreferences.liked) ? cloudPreferences.liked : [])])];
+          return next;
+        });
         setUserPlaylists(mergePlaylistList(Array.isArray(data.playlists) ? data.playlists : []));
         await refreshUserPlaylists();
       } catch (error) {
@@ -1627,22 +1660,25 @@ export default function App() {
       }
     })();
     return () => { active = false; };
-  }, [authUser, refreshUserPlaylists]);
+  }, [authUid, refreshUserPlaylists]);
 
   useEffect(() => {
-    if (!authUser || !libraryHydrated) return undefined;
+    if (!authUid || !libraryHydrated) return undefined;
     if (!didInitialLibrarySync.current) {
       didInitialLibrarySync.current = true;
       return undefined;
     }
 
     const timer = setTimeout(async () => {
+      const dirtyKeys = [...dirtyPrefKeysRef.current];
+      if (!dirtyKeys.length) return;
       try {
         const payload = {
           preferences: {
             theme: prefs.theme,
             accent: prefs.accent,
             customAccent: prefs.customAccent,
+            accentIntensity: prefs.accentIntensity,
             waveforms: prefs.waveforms,
             compact: prefs.compact,
             spin: prefs.spin,
@@ -1658,13 +1694,14 @@ export default function App() {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.message || 'Unable to sync your library.');
         }
+        dirtyKeys.forEach((key) => dirtyPrefKeysRef.current.delete(key));
       } catch (error) {
         setNotice(error.message || 'Unable to sync your library.');
       }
-    }, 350);
+    }, 800);
 
     return () => clearTimeout(timer);
-  }, [authUser, libraryHydrated, prefs.theme, prefs.accent, prefs.customAccent, prefs.waveforms, prefs.compact, prefs.spin, prefs.volume, prefs.liked]);
+  }, [authUid, libraryHydrated, prefs.theme, prefs.accent, prefs.customAccent, prefs.accentIntensity, prefs.waveforms, prefs.compact, prefs.spin, prefs.volume, prefs.liked]);
 
   /* ------------------------------ data ------------------------------ */
 
