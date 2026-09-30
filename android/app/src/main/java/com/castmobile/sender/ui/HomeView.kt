@@ -21,9 +21,38 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.sonara.app.model.Folder
 import com.sonara.app.model.Track
 import java.util.Calendar
+
+private fun mixSeedValue(value: String): Int {
+    var hash = 2166136261L
+    for (char in value) {
+        hash = (hash xor char.code.toLong()) * 16777619L and 0x7fffffffL
+    }
+    return (hash and 0x7fffffffL).toInt()
+}
+
+private fun buildDailyMixTracks(tracks: List<Track>, userId: String, dateKey: String, limit: Int = 5): List<Track> {
+    if (tracks.isEmpty()) return emptyList()
+    val safeLimit = maxOf(1, minOf(limit, tracks.size))
+    val seed = "$dateKey:$userId:daily"
+    return tracks
+        .map { track -> track to mixSeedValue("$seed:${track.id}:${track.title}:${track.artist}") }
+        .sortedBy { it.second }
+        .map { it.first }
+        .take(safeLimit)
+}
+
+private fun pickFeaturedTrack(tracks: List<Track>, recentIds: Set<Long>, history: List<String>): Track? {
+    val playable = tracks.filter { it.remoteId != null }
+    if (playable.isEmpty()) return null
+    val exclusionCount = minOf(10, playable.size / 2)
+    val blocked = history.takeLast(exclusionCount).toSet()
+    val eligible = playable.filter { it.id !in recentIds && it.remoteId !in blocked }
+    return (eligible.ifEmpty { playable.filter { it.remoteId != history.lastOrNull() }.ifEmpty { playable } }).randomOrNull()
+}
 
 @Composable
 fun LiquidHome(
@@ -62,7 +91,7 @@ private fun OnlineTransitionScreen(
     systemDark: Boolean
 ) {
     val isDark = themeViewModel.isDark(systemDark)
-    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+    val bg = themeViewModel.surfaceTint
     val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
     val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
     val accent = themeViewModel.getAccentColor(isDark)
@@ -123,7 +152,7 @@ private fun OnlineHomeView(
     onFolderClick: (Folder) -> Unit
 ) {
     val isDark = themeViewModel.isDark(systemDark)
-    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+    val bg = themeViewModel.surfaceTint
     val paper = if (isDark) SonaraDesign.DarkPaper else SonaraDesign.LightPaper
     val line = if (isDark) SonaraDesign.DarkLine else SonaraDesign.LightLine
     val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
@@ -477,8 +506,31 @@ private fun OfflineHomeView(
 
     val current = viewModel.currentTrack
     val allTracks = viewModel.allTracks
-    val spotlightTrack = current ?: viewModel.recentlyPlayedTracks.firstOrNull() ?: allTracks.firstOrNull()
+    val recentTracks = viewModel.recentlyPlayedTracks
+    val recentIds = remember(recentTracks) { recentTracks.map { it.id }.toSet() }
+    val context = LocalContext.current
+    var featuredTrack by remember { mutableStateOf<Track?>(null) }
+    LaunchedEffect(allTracks) {
+        if (featuredTrack == null && allTracks.isNotEmpty()) {
+            val historyPrefs = context.getSharedPreferences("sonara_featured_history", android.content.Context.MODE_PRIVATE)
+            val history = historyPrefs.getStringSet("ids", emptySet())?.toList() ?: emptyList()
+            val next = pickFeaturedTrack(allTracks, recentIds, history)
+            featuredTrack = next
+            next?.remoteId?.let { id ->
+                val updated = (history + id).takeLast(10).toSet()
+                historyPrefs.edit().putStringSet("ids", updated).apply()
+            }
+        }
+    }
+    val dailyMix = remember(allTracks, viewModel.userEmail) {
+        val dateKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        buildDailyMixTracks(allTracks, viewModel.userEmail ?: viewModel.username ?: "guest", dateKey, 5)
+    }
     val isPlaying = viewModel.isPlaying
+    val spotlightTrack = if (isPlaying && current != null) current else featuredTrack
+    val discoverTracks = remember(allTracks, recentIds) {
+        allTracks.filterNot { it.id in recentIds }.take(5)
+    }
 
     val soundscapes = remember(viewModel.userPlaylists, viewModel.folders) {
         val list = mutableListOf<SoundscapeItem>()
@@ -497,8 +549,6 @@ private fun OfflineHomeView(
         }
         list
     }
-
-    val recentTracks = if (viewModel.recentlyPlayedTracks.isNotEmpty()) viewModel.recentlyPlayedTracks else allTracks.take(6)
 
     LazyColumn(
         modifier = Modifier
@@ -769,6 +819,153 @@ private fun OfflineHomeView(
                                         text = formatTime(track.duration),
                                         color = muted,
                                         fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─── Daily Mix + Discover ───────────────────────────────────────
+        if (dailyMix.isNotEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 24.dp, bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Daily recommended mix",
+                            color = text,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            text = "Refresh",
+                            color = accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        dailyMix.forEach { track ->
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { val idx = allTracks.indexOfFirst { it.id == track.id }; viewModel.playFromList(dailyMix, if (idx >= 0) idx else 0, "Daily Mix") },
+                                shape = RoundedCornerShape(20.dp),
+                                color = paper,
+                                border = BorderStroke(1.dp, line)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CoverArt(track = track, sizeDp = 58.dp)
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        text = track.title,
+                                        color = text,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = track.artist,
+                                        color = muted,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (discoverTracks.isNotEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 24.dp, bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Discover",
+                            color = text,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            text = "Surprise me",
+                            color = accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { featuredTrack?.let { track -> val idx = allTracks.indexOfFirst { it.id == track.id }; viewModel.playFromList(allTracks, if (idx >= 0) idx else 0, "Discover") } }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        discoverTracks.forEach { track ->
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { val idx = allTracks.indexOfFirst { it.id == track.id }; viewModel.playFromList(allTracks, if (idx >= 0) idx else 0, "Discover") },
+                                shape = RoundedCornerShape(20.dp),
+                                color = paper,
+                                border = BorderStroke(1.dp, line)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CoverArt(track = track, sizeDp = 54.dp)
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        text = track.title,
+                                        color = text,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = track.artist,
+                                        color = muted,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }

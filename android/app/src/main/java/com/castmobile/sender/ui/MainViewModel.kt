@@ -671,10 +671,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             recentlyPlayedFolders = (folders + userPlaylists).filter { it.lastPlayedTimestamp > 0 }.sortedByDescending { it.lastPlayedTimestamp }.take(6)
             
-            val recentTrackIds = listeningHistory.getRecentlyPlayed(10)
-            val all = allTracks
-            recentlyPlayedTracks = recentTrackIds.mapNotNull { id: Long -> all.find { it.id == id } }
+            refreshRecentlyPlayedTracks()
         }
+    }
+
+    private fun refreshRecentlyPlayedTracks() {
+        val recentTrackIds = listeningHistory.getRecentlyPlayed(15)
+        recentlyPlayedTracks = recentTrackIds.mapNotNull { id -> allTracks.find { it.id == id } }
     }
 
     private fun loadFavorites() {
@@ -925,8 +928,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Record as complete if listened to > 80%
             if (completionRatio > 0.8f) {
                 listeningHistory.recordEvent(previousTrack, ListeningHistory.EventType.COMPLETE, playDuration)
+                refreshRecentlyPlayedTracks()
             } else if (completionRatio < 0.3f) {
                 listeningHistory.recordEvent(previousTrack, ListeningHistory.EventType.SKIP, playDuration)
+                refreshRecentlyPlayedTracks()
             }
         }
         
@@ -1103,6 +1108,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             // Record play event
             listeningHistory.recordEvent(nextTrack, ListeningHistory.EventType.PLAY)
+            refreshRecentlyPlayedTracks()
             
             playTrack(nextTrack, emptyList(), djMode = true)
         } else {
@@ -1417,6 +1423,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Record skip
             currentTrack?.let { track ->
                 listeningHistory.recordEvent(track, ListeningHistory.EventType.SKIP)
+                refreshRecentlyPlayedTracks()
             }
             playNextDjTrack()
         }
@@ -1438,6 +1445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             tracksInCurrentTheme++
             
             listeningHistory.recordEvent(nextTrack, ListeningHistory.EventType.PLAY)
+            refreshRecentlyPlayedTracks()
             playTrack(nextTrack, emptyList(), djMode = true)
         }
     }

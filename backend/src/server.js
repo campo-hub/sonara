@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import * as mm from 'music-metadata';
+import { randomUUID } from 'node:crypto';
 
 import {
   isAudioFile,
@@ -29,9 +30,120 @@ import {
   renamePlaylistForUser
 } from './playlistStore.js';
 import { getUserProfile, saveUserProfile, validateUsername } from './userStore.js';
+import { generateDailyMixSnapshot, getPlayableTracks } from './recommendationUtils.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+const memoryDailyMixes = new Map();
+const memoryMixHistory = new Map();
+const memorySavedMixes = new Map();
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const getLocalDateKey = (timeZone, now = new Date()) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+    const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return new Date(now).toISOString().slice(0, 10);
+  }
+};
+
+const getRecommendationRequest = (req) => {
+  const timeZone = String(req.query.tz || 'UTC');
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format();
+  } catch {
+    return { error: 'Invalid timezone.' };
+  }
+  const deviceId = String(req.query.deviceId || '').trim();
+  if (deviceId && !UUID_PATTERN.test(deviceId)) return { error: 'Invalid device id.' };
+  const dateKey = getLocalDateKey(timeZone);
+  const ownerKey = req.user?.uid ? `u:${req.user.uid}` : `d:${deviceId || 'anonymous'}`;
+  return { timeZone, deviceId, dateKey, ownerKey };
+};
+
+const recommendationCollections = async () => {
+  if (!isMongoConfigured()) return null;
+  const db = await getDb();
+  const dailyMixes = db.collection('dailyMixes');
+  const mixHistory = db.collection('mixHistory');
+  const savedMixes = db.collection('savedMixes');
+  await Promise.all([
+    dailyMixes.createIndex({ ownerKey: 1, dateKey: 1 }, { unique: true }),
+    dailyMixes.createIndex({ createdAt: 1 }, { expireAfterSeconds: 8 * 24 * 60 * 60 }),
+    mixHistory.createIndex({ ownerKey: 1 }, { unique: true }),
+    mixHistory.createIndex({ updatedAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 }),
+    savedMixes.createIndex({ ownerUid: 1, updatedAt: -1 }),
+    savedMixes.createIndex({ ownerUid: 1, 'origin.mixId': 1 }, { unique: true })
+  ]);
+  return { dailyMixes, mixHistory, savedMixes };
+};
+
+const getDailySnapshot = async (ownerKey, dateKey) => {
+  const collections = await recommendationCollections();
+  if (!collections) return memoryDailyMixes.get(`${ownerKey}:${dateKey}`) || null;
+  return collections.dailyMixes.findOne({ ownerKey, dateKey }, { projection: { _id: 0 } });
+};
+
+const createDailySnapshot = async ({ ownerKey, dateKey, catalog, deviceId, uid }) => {
+  const collections = await recommendationCollections();
+  const key = `${ownerKey}:${dateKey}`;
+  if (!collections) {
+    const existing = memoryDailyMixes.get(key);
+    if (existing) return existing;
+    const history = memoryMixHistory.get(ownerKey) || { seen: [], names: [] };
+    const generated = generateDailyMixSnapshot({ catalog, dateKey, seen: history.seen, recentNames: history.names });
+    const snapshot = { ownerKey, dateKey, mixes: generated.mixes, createdAt: new Date().toISOString(), deviceId, ownerUid: uid || null };
+    memoryMixHistory.set(ownerKey, { seen: generated.seen, names: generated.names, updatedAt: new Date().toISOString() });
+    memoryDailyMixes.set(key, snapshot);
+    return snapshot;
+  }
+
+  const history = await collections.mixHistory.findOne({ ownerKey }) || { seen: [], names: [] };
+  const generated = generateDailyMixSnapshot({ catalog, dateKey, seen: history.seen, recentNames: history.names });
+  const snapshot = { ownerKey, dateKey, mixes: generated.mixes, createdAt: new Date(), deviceId, ownerUid: uid || null };
+  try {
+    await collections.dailyMixes.insertOne(snapshot);
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+  }
+  await collections.mixHistory.updateOne(
+    { ownerKey },
+    { $set: { ownerKey, cycle: history.cycle || 0, seen: generated.seen, names: generated.names, updatedAt: new Date() } },
+    { upsert: true }
+  );
+  return (await getDailySnapshot(ownerKey, dateKey)) || snapshot;
+};
+
+const enrichDailyMixes = async (snapshot, uid) => {
+  const catalog = await listTracks();
+  const byId = new Map(getPlayableTracks(catalog).map((track) => [track.id, track]));
+  const saved = uid ? await listSavedMixes(uid) : [];
+  return (snapshot?.mixes || []).map((mix) => {
+    const savedMix = saved.find((item) => item.origin?.mixId === mix.id);
+    return {
+      ...mix,
+      label: 'Recommended',
+      trackIds: mix.trackIds.filter((id) => byId.has(String(id))),
+      saved: Boolean(savedMix),
+      savedId: savedMix?.id || null
+    };
+  });
+};
+
+const listSavedMixes = async (ownerUid) => {
+  const collections = await recommendationCollections();
+  if (!collections) return [...memorySavedMixes.values()].filter((mix) => mix.ownerUid === ownerUid);
+  return collections.savedMixes.find({ ownerUid }, { projection: { _id: 0 } }).sort({ updatedAt: -1 }).toArray();
+};
+
+const findSavedMix = async (ownerUid, id) => {
+  const collections = await recommendationCollections();
+  if (!collections) return memorySavedMixes.get(id)?.ownerUid === ownerUid ? memorySavedMixes.get(id) : null;
+  return collections.savedMixes.findOne({ ownerUid, id }, { projection: { _id: 0 } });
+};
 
 /* -------------------------------------------------------------------------- */
 /*  CORS                                                                      */
@@ -152,6 +264,35 @@ app.get('/api/health', async (_req, res) => {
  * in POST /api/uploads/bulk below.
  */
 const WRITE_CONCURRENCY = 10;
+
+function hashMixSeed(value = '') {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function getMixDateKey(date = new Date()) {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
+function buildDailyMixForCatalog({ catalog = [], userId = 'guest', dateKey = getMixDateKey(), limit = 5 } = {}) {
+  const tracks = Array.isArray(catalog) ? catalog.filter((track) => track && track.id && (track.audioUrl || track.audio_url || track.src)) : [];
+  if (!tracks.length) return [];
+
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, tracks.length));
+  const seed = `${dateKey}:${String(userId || 'guest')}`;
+  const ranked = tracks.map((track) => ({
+    ...track,
+    _score: hashMixSeed(`${seed}:${track.id}:${track.title || ''}:${track.artist || ''}`)
+  })).sort((left, right) => left._score - right._score)
+    .slice(0, safeLimit)
+    .map(({ _score, ...track }) => track);
+
+  return ranked;
+}
 
 /**
  * Makes sure every audio file that exists in the R2 bucket also exists in the
@@ -517,6 +658,224 @@ app.delete('/api/me/playlists/:id/tracks/:trackId', requireAuth, async (req, res
   } catch (error) {
     console.error('[playlists] remove track failed', error);
     res.status(500).json({ message: 'Unable to remove the track from your playlist right now.' });
+  }
+});
+
+async function getUserLibraryDocument(uid) {
+  if (!uid || !isMongoConfigured()) return { data: buildEmptyLibraryPayload() };
+  const db = await getDb();
+  const doc = await db.collection('userLibraries').findOne({ uid });
+  return { db, data: normalizeLibraryData(doc?.data || buildEmptyLibraryPayload()) };
+}
+
+async function upsertUserLibraryDocument(uid, data) {
+  if (!uid || !isMongoConfigured()) return null;
+  const db = await getDb();
+  const payload = normalizeLibraryData(data || buildEmptyLibraryPayload());
+  await db.collection('userLibraries').updateOne(
+    { uid },
+    { $set: { uid, data: payload, updatedAt: new Date() } },
+    { upsert: true }
+  );
+  return payload;
+}
+
+app.get('/api/recommendations/daily', async (req, res) => {
+  try {
+    const request = getRecommendationRequest(req);
+    if (request.error) return res.status(400).json({ message: request.error });
+    const catalog = await listTracks();
+    let snapshot = await getDailySnapshot(request.ownerKey, request.dateKey);
+    if (!snapshot && req.user && request.deviceId) {
+      snapshot = await getDailySnapshot(`d:${request.deviceId}`, request.dateKey);
+      if (snapshot) {
+        snapshot = { ...snapshot, ownerKey: request.ownerKey, ownerUid: req.user.uid };
+        const collections = await recommendationCollections();
+        if (collections) {
+          await collections.dailyMixes.updateOne({ ownerKey: request.ownerKey, dateKey: request.dateKey }, { $setOnInsert: snapshot }, { upsert: true });
+        } else {
+          memoryDailyMixes.set(`${request.ownerKey}:${request.dateKey}`, snapshot);
+        }
+      }
+    }
+    if (!snapshot) snapshot = await createDailySnapshot({ ...request, catalog, uid: req.user?.uid });
+    const mixes = await enrichDailyMixes(snapshot, req.user?.uid);
+    const payload = JSON.stringify({ dateKey: request.dateKey, nextRefreshAt: `${request.dateKey}T23:59:59.999Z`, mixes });
+    const etag = `"${Buffer.from(payload).toString('base64url')}"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.set('ETag', etag);
+    return res.json(JSON.parse(payload));
+  } catch (error) {
+    console.error('[recommendations] daily read failed', error);
+    return res.status(500).json({ message: 'Unable to load recommendations right now.' });
+  }
+});
+
+app.get('/api/me/daily-mix', requireAuth, async (req, res) => {
+  try {
+    const dateKey = getMixDateKey();
+    const library = await getUserLibraryDocument(req.user.uid);
+    const currentMix = Array.isArray(library.data.dailyMixes)
+      ? library.data.dailyMixes.find((mix) => mix.dateKey === dateKey && mix.owner === req.user.uid)
+      : null;
+
+    const catalog = await listTracks();
+    const generated = buildDailyMixForCatalog({ catalog, userId: req.user.uid, dateKey, limit: 5 });
+    const payload = {
+      id: `daily-${dateKey}`,
+      name: 'Daily mix',
+      dateKey,
+      deviceId: String(req.headers['x-device-id'] || 'web').trim() || 'web',
+      owner: req.user.uid,
+      trackIds: generated.map((track) => String(track.id)),
+      tracks: generated,
+      createdAt: currentMix?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (currentMix && currentMix.trackIds?.length) {
+      payload.trackIds = currentMix.trackIds;
+      payload.tracks = currentMix.tracks?.length ? currentMix.tracks : generated;
+    }
+
+    const nextDocument = {
+      ...library.data,
+      dailyMixes: [
+        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== dateKey || mix.owner !== req.user.uid) : []),
+        payload
+      ],
+      mixHistory: Array.isArray(library.data.mixHistory) ? library.data.mixHistory.slice(-25) : []
+    };
+
+    await upsertUserLibraryDocument(req.user.uid, nextDocument);
+
+    const responseBody = JSON.stringify(payload);
+    const etag = `"${Buffer.from(responseBody).toString('base64url')}"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.set('ETag', etag);
+    res.json(payload);
+  } catch (error) {
+    console.error('[daily-mix] read failed', error);
+    res.status(500).json({ message: 'Unable to load your daily mix right now.' });
+  }
+});
+
+app.post('/api/me/daily-mix/refresh', requireAuth, async (req, res) => {
+  try {
+    const dateKey = getMixDateKey();
+    const catalog = await listTracks();
+    const tracks = buildDailyMixForCatalog({ catalog, userId: req.user.uid, dateKey, limit: 5 });
+    const payload = {
+      id: `daily-${dateKey}`,
+      name: 'Daily mix',
+      dateKey,
+      deviceId: String(req.headers['x-device-id'] || req.body?.deviceId || 'web').trim() || 'web',
+      owner: req.user.uid,
+      trackIds: tracks.map((track) => String(track.id)),
+      tracks,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const library = await getUserLibraryDocument(req.user.uid);
+    const nextDocument = {
+      ...library.data,
+      dailyMixes: [
+        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== dateKey || mix.owner !== req.user.uid) : []),
+        payload
+      ],
+      mixHistory: [
+        payload,
+        ...(Array.isArray(library.data.mixHistory) ? library.data.mixHistory : [])
+      ].slice(0, 25)
+    };
+
+    await upsertUserLibraryDocument(req.user.uid, nextDocument);
+    res.status(201).json(payload);
+  } catch (error) {
+    console.error('[daily-mix] refresh failed', error);
+    res.status(500).json({ message: 'Unable to refresh your daily mix right now.' });
+  }
+});
+
+app.get('/api/me/mixes', requireAuth, async (req, res) => {
+  try {
+    const mixes = await listSavedMixes(req.user.uid);
+    const payload = JSON.stringify(mixes);
+    const etag = `"${Buffer.from(payload).toString('base64url')}"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.set('ETag', etag);
+    res.json(mixes);
+  } catch (error) {
+    console.error('[mixes] read failed', error);
+    res.status(500).json({ message: 'Unable to load your mixes right now.' });
+  }
+});
+
+app.post('/api/me/mixes', requireAuth, async (req, res) => {
+  try {
+    const dailyMixId = String(req.body?.dailyMixId || '').trim();
+    const dateKey = String(req.body?.dateKey || '').trim();
+    if (!dailyMixId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return res.status(400).json({ message: 'A daily mix id and date are required.' });
+    const snapshot = await getDailySnapshot(`u:${req.user.uid}`, dateKey);
+    const source = snapshot?.mixes?.find((mix) => mix.id === dailyMixId);
+    if (!source) return res.status(404).json({ message: 'Recommended mix not found.' });
+    const existing = (await listSavedMixes(req.user.uid)).find((mix) => mix.origin?.mixId === dailyMixId && mix.origin?.dateKey === dateKey);
+    if (existing) return res.json(existing);
+    const currentCount = (await listSavedMixes(req.user.uid)).length;
+    if (currentCount >= 200) return res.status(400).json({ message: 'You have reached the saved mix limit.' });
+    const mix = {
+      id: randomUUID(), ownerUid: req.user.uid, name: source.name, trackIds: [...source.trackIds].slice(0, 500), kind: 'recommended',
+      origin: { dateKey, mixId: source.id, flavor: source.flavor }, createdAt: new Date(), updatedAt: new Date(), editedAt: null
+    };
+    const collections = await recommendationCollections();
+    if (!collections) memorySavedMixes.set(mix.id, mix);
+    else {
+      try { await collections.savedMixes.insertOne(mix); } catch (error) {
+        if (error?.code === 11000) return res.json((await listSavedMixes(req.user.uid)).find((item) => item.origin?.mixId === dailyMixId));
+        throw error;
+      }
+    }
+    return res.status(201).json(mix);
+  } catch (error) {
+    console.error('[mixes] write failed', error);
+    res.status(500).json({ message: 'Unable to save your mix right now.' });
+  }
+});
+
+app.patch('/api/me/mixes/:id', requireAuth, async (req, res) => {
+  try {
+    const current = await findSavedMix(req.user.uid, req.params.id);
+    if (!current) return res.status(404).json({ message: 'Mix not found.' });
+    const name = req.body?.name === undefined ? current.name : String(req.body.name).trim();
+    if (!name || name.length > 60) return res.status(400).json({ message: 'Mix name must be 1-60 characters.' });
+    const currentIds = new Set((current.trackIds || []).map(String));
+    const trackIds = req.body?.trackIds === undefined ? current.trackIds : req.body.trackIds;
+    if (!Array.isArray(trackIds) || trackIds.length > 500 || new Set(trackIds.map(String)).size !== trackIds.length || trackIds.some((id) => !currentIds.has(String(id)))) {
+      return res.status(400).json({ message: 'Track ids must be a unique subset of this mix.' });
+    }
+    const nextMix = { ...current, name, trackIds: trackIds.map(String), kind: 'personal', editedAt: new Date(), updatedAt: new Date() };
+    const collections = await recommendationCollections();
+    if (!collections) memorySavedMixes.set(req.params.id, nextMix);
+    else await collections.savedMixes.replaceOne({ ownerUid: req.user.uid, id: req.params.id }, nextMix);
+    return res.json(nextMix);
+  } catch (error) {
+    console.error('[mixes] update failed', error);
+    res.status(500).json({ message: 'Unable to update your mix right now.' });
+  }
+});
+
+app.delete('/api/me/mixes/:id', requireAuth, async (req, res) => {
+  try {
+    const current = await findSavedMix(req.user.uid, req.params.id);
+    if (!current) return res.status(404).json({ message: 'Mix not found.' });
+    const collections = await recommendationCollections();
+    if (!collections) memorySavedMixes.delete(req.params.id);
+    else await collections.savedMixes.deleteOne({ ownerUid: req.user.uid, id: req.params.id });
+    return res.json({ ok: true, deleted: true, id: req.params.id });
+  } catch (error) {
+    console.error('[mixes] delete failed', error);
+    res.status(500).json({ message: 'Unable to delete your mix right now.' });
   }
 });
 

@@ -281,6 +281,18 @@ fun LiquidLab(
                                 )
 
                                 Spacer(Modifier.height(12.dp))
+                                Text("Color intensity", color = text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("subtle", "balanced", "immersive").forEach { intensity ->
+                                        FilterChip(
+                                            selected = themeViewModel.accentIntensity == intensity,
+                                            onClick = { themeViewModel.updateAccentIntensity(intensity) },
+                                            label = { Text(intensity.replaceFirstChar { it.uppercase() }) }
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.height(12.dp))
 
                                 TextButton(
                                     onClick = { themeViewModel.updateAccent("poppy") }

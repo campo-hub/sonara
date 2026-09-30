@@ -8,6 +8,17 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <script>
+      (() => {
+        try {
+          const prefs = JSON.parse(localStorage.getItem('sonara.web.prefs.v2') || '{}');
+          const dark = prefs.theme === 'dark' || (prefs.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+          const accents = { poppy: dark ? '#FF6B4A' : '#D83A22', ochre: dark ? '#E5B04A' : '#B7791F', moss: dark ? '#8FB07A' : '#4D6B3F', ink: dark ? '#8FA9CC' : '#2F4B6E', teal: dark ? '#6FB5AE' : '#2F7470', graphite: dark ? '#CFCBC0' : '#2B2A27' };
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          document.documentElement.style.setProperty('--accent', prefs.accent === 'custom' ? prefs.customAccent : accents[prefs.accent] || accents.poppy);
+        } catch {}
+      })();
+    </script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
     <script type="module" src="/src/main.jsx"></script>

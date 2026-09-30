@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
-import { clearCachedCatalog, getCachedCatalog, isSampleCatalog, mergePlaylistList, normalizePlaylistShape, saveCachedCatalog } from './catalogUtils.js';
+import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
+import { buildAccentPalette } from './colorUtils.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -104,6 +105,30 @@ const getUserDisplayName = (user) => {
   return 'Listener';
 };
 
+const getDeviceId = () => {
+  const key = 'sonara.web.device.id.v1';
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const next = crypto.randomUUID();
+    window.localStorage.setItem(key, next);
+    return next;
+  } catch {
+    return '00000000-0000-4000-8000-000000000000';
+  }
+};
+
+const relativeTime = (timestamp) => {
+  const elapsed = Math.max(0, Date.now() - Number(timestamp || 0));
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  if (hours < 48) return 'Yesterday';
+  return `${Math.floor(hours / 24)} d ago`;
+};
+
 /* Uploads run in groups so huge selections stay fast and cancellable. */
 const BATCH_OPTIONS = [5, 10, 25, 50];
 const DEFAULT_BATCH_SIZE = 10;
@@ -153,6 +178,7 @@ const defaultPrefs = {
   theme: 'light',
   accent: 'poppy',
   customAccent: '#D83A22',
+  accentIntensity: 'balanced',
   waveforms: true,
   compact: false,
   spin: true,
@@ -1214,8 +1240,14 @@ export default function App() {
   const [labTab, setLabTab] = useState('themes');
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('name');
+  const [collectionFilter, setCollectionFilter] = useState('all');
+  const [dailyRecommendations, setDailyRecommendations] = useState({ state: 'loading', dateKey: '', mixes: [] });
+  const [recommendationRefresh, setRecommendationRefresh] = useState(0);
   const [prefs, setPrefs] = useState(loadPrefs);
+  const [featuredHistory, setFeaturedHistory] = useState(loadFeaturedHistory);
+  const [playHistory, setPlayHistory] = useState(loadPlayHistory);
   const [notice, setNotice] = useState('');
+  const playProgressRef = useRef({ trackId: '', lastTime: 0, listenedSeconds: 0, qualified: false });
   const [stageOpen, setStageOpen] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -1724,6 +1756,34 @@ export default function App() {
   const allTracks = catalogTracks;
   const trackById = useMemo(() => new Map(allTracks.map((track) => [track.id, track])), [allTracks]);
 
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const loadRecommendations = async () => {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const params = new URLSearchParams({ tz: timeZone, deviceId: getDeviceId() });
+      try {
+        let token = null;
+        try { token = await getCurrentIdToken(); } catch { token = null; }
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const response = await fetch(`${apiBase}/recommendations/daily?${params}`, { headers, signal: controller.signal, cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load recommendations.');
+        if (!active) return;
+        setDailyRecommendations({ state: 'ready', dateKey: data.dateKey || '', mixes: Array.isArray(data.mixes) ? data.mixes : [] });
+      } catch (error) {
+        if (active && error.name !== 'AbortError') setDailyRecommendations((previous) => ({ ...previous, state: 'error' }));
+      }
+    };
+    loadRecommendations();
+    return () => { active = false; controller.abort(); };
+  }, [authUser, recommendationRefresh]);
+
+  const recommendedMixes = useMemo(() => dailyRecommendations.mixes.map((mix) => ({
+    ...mix,
+    tracks: (mix.trackIds || []).map((id) => trackById.get(String(id))).filter(Boolean)
+  })), [dailyRecommendations.mixes, trackById]);
+
   const recentUploads = useMemo(() => {
     const seen = new Set();
     return [...sessionUploads, ...catalogTracks].filter((track) => (seen.has(track.id) ? false : seen.add(track.id))).slice(0, 5);
@@ -1761,7 +1821,50 @@ export default function App() {
   );
   const selectedPlaylist = playlists.find((playlist) => playlist.id === playlistId) || playlists[0] || null;
   const favoriteTracks = useMemo(() => allTracks.filter((track) => likedIds.has(track.id)), [allTracks, likedIds]);
-  const recentTracks = useMemo(() => [...allTracks].sort((a, b) => b.addedAt - a.addedAt).slice(0, 6), [allTracks]);
+  const recentlyAddedTracks = useMemo(() => [...allTracks].sort((a, b) => b.addedAt - a.addedAt).slice(0, 6), [allTracks]);
+  const dailyMix = useMemo(() => buildDailyMix({
+    catalog: allTracks,
+    userId: authUser?.uid || authUser?.email || 'guest',
+    dateKey: new Date().toISOString().slice(0, 10),
+    limit: 5
+  }), [allTracks, authUser]);
+  const [featuredTrack, setFeaturedTrack] = useState(null);
+  const featuredPickCatalogRef = useRef('');
+  const recentHistoryTracks = useMemo(
+    () => playHistory.map((entry) => trackById.get(entry.trackId)).filter(Boolean),
+    [playHistory, trackById]
+  );
+  const recentPlayedIds = useMemo(() => recentHistoryTracks.slice(0, 15).map((track) => track.id), [recentHistoryTracks]);
+
+  useEffect(() => {
+    saveFeaturedHistory(featuredHistory);
+  }, [featuredHistory]);
+
+  useEffect(() => {
+    savePlayHistory(playHistory);
+  }, [playHistory]);
+
+  useEffect(() => {
+    const playable = allTracks.filter((track) => track?.audioUrl);
+    if (!playable.length) {
+      setFeaturedTrack(null);
+      featuredPickCatalogRef.current = '';
+      return;
+    }
+    if (featuredTrack && playable.some((track) => track.id === featuredTrack.id)) return;
+    const catalogSignature = playable.map((track) => track.id).join('|');
+    if (featuredPickCatalogRef.current === catalogSignature) return;
+    const next = pickRandomFeaturedTrack({
+      catalog: playable,
+      recentIds: featuredHistory,
+      recentlyPlayedIds: recentPlayedIds
+    });
+    if (!next) return;
+    featuredPickCatalogRef.current = catalogSignature;
+    setFeaturedTrack(next);
+    setFeaturedHistory((previous) => [...previous.filter((id) => id !== next.id), next.id].slice(-10));
+  }, [allTracks, featuredHistory, featuredTrack, recentPlayedIds]);
+  const discoverTracks = useMemo(() => allTracks.filter((track) => !favoriteTracks.some((liked) => liked.id === track.id)).slice(0, 5), [allTracks, favoriteTracks]);
 
   const visibleTracks = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -1787,9 +1890,23 @@ export default function App() {
     root.dataset.theme = resolvedTheme;
     const option = accentOptions.find((item) => item.id === prefs.accent);
     const color = prefs.accent === 'custom' ? prefs.customAccent : (option || accentOptions[0])[resolvedTheme];
-    root.style.setProperty('--accent', color);
-    root.style.setProperty('--on-accent', readableOn(color));
-  }, [resolvedTheme, prefs.accent, prefs.customAccent]);
+    const palette = buildAccentPalette(color, resolvedTheme, prefs.accentIntensity);
+    root.dataset.intensity = prefs.accentIntensity;
+    root.style.setProperty('--accent', palette.accent);
+    root.style.setProperty('--accent-strong', palette.accentStrong);
+    root.style.setProperty('--accent-soft', palette.accentSoft);
+    root.style.setProperty('--on-accent', palette.onAccent);
+    root.style.setProperty('--tint-bg', palette.tintBg);
+    root.style.setProperty('--tint-paper', palette.tintPaper);
+    root.style.setProperty('--tint-raised', palette.tintRaised);
+    root.style.setProperty('--tint-line', palette.tintLine);
+    root.style.setProperty('--bg', palette.tintBg);
+    root.style.setProperty('--paper', palette.tintPaper);
+    root.style.setProperty('--raised', palette.tintRaised);
+    root.style.setProperty('--line', palette.tintLine);
+    palette.tones.forEach((tone, index) => root.style.setProperty(`--tone-${index + 1}`, tone));
+    palette.toneForegrounds.forEach((tone, index) => root.style.setProperty(`--tone-${index + 1}-fg`, tone));
+  }, [resolvedTheme, prefs.accent, prefs.customAccent, prefs.accentIntensity]);
 
   useEffect(() => {
     try {
@@ -1798,6 +1915,13 @@ export default function App() {
       /* storage unavailable */
     }
   }, [prefs]);
+
+  useEffect(() => {
+    const themeMeta = document.querySelector('meta[name="theme-color"]') || document.createElement('meta');
+    themeMeta.name = 'theme-color';
+    themeMeta.setAttribute('content', prefs.accent === 'custom' ? prefs.customAccent : accentOptions.find((item) => item.id === prefs.accent)?.[resolvedTheme] || accentOptions[0][resolvedTheme]);
+    if (!themeMeta.parentNode) document.head.appendChild(themeMeta);
+  }, [prefs.accent, prefs.customAccent, resolvedTheme]);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -1847,6 +1971,34 @@ export default function App() {
     }
     setPosition(0);
     setIsPlaying(true);
+  };
+
+  const recordPlaybackProgress = (track, currentTime, duration, ended = false) => {
+    if (!track?.id) return;
+    const progress = playProgressRef.current;
+    const shortTrackEnded = ended && duration > 0 && duration < 20 && currentTime >= duration - 0.25;
+    if (!progress.qualified && qualifiesForPlayHistory({ listenedSeconds: progress.listenedSeconds, currentTime, duration: shortTrackEnded ? duration : 0 })) {
+      progress.qualified = true;
+      setPlayHistory((previous) => updatePlayHistory({ history: previous, trackId: track.id, at: Date.now() }));
+    }
+  };
+
+  const handleAudioTimeUpdate = (event) => {
+    const audio = event.currentTarget;
+    setPosition(audio.currentTime);
+    if (!current?.id || !isPlaying) return;
+    const progress = playProgressRef.current;
+    if (progress.trackId !== current.id) {
+      progress.trackId = current.id;
+      progress.lastTime = audio.currentTime;
+      progress.listenedSeconds = 0;
+      progress.qualified = false;
+      return;
+    }
+    const delta = audio.currentTime - progress.lastTime;
+    progress.lastTime = audio.currentTime;
+    if (delta > 0 && delta <= 1.5) progress.listenedSeconds += delta;
+    recordPlaybackProgress(current, audio.currentTime, audio.duration || current.seconds || 0);
   };
 
   const playFromList = (list, index, label) => {
@@ -1939,8 +2091,15 @@ export default function App() {
       setNotice('DJ stopped. Your queue stays as it is.');
       return;
     }
-    const first = current || allTracks[0];
+
+    const first = (isPlaying && current) || featuredTrack || pickRandomFeaturedTrack({
+      catalog: allTracks,
+      recentIds: featuredHistory,
+      recentlyPlayedIds: recentPlayedIds
+    }) || allTracks.find((track) => track.audioUrl);
     if (!first) return;
+
+    setFeaturedHistory((previous) => [...previous.filter((id) => id !== first.id), first.id].slice(-6));
     setQueue([first, ...shuffled(allTracks.filter((track) => track.id !== first.id))]);
     setQueueBase(allTracks);
     setPos(0);
@@ -1950,7 +2109,7 @@ export default function App() {
     setRepeat('off');
     setDjOn(true);
     setIsPlaying(true);
-    setNotice('DJ is on. Sonara will keep the mix going.');
+    setNotice(`DJ is on. Starting with ${first.title}.`);
   };
 
   advanceRef.current = advance;
@@ -2217,20 +2376,26 @@ export default function App() {
   /* ------------------------------ views ------------------------------ */
 
   const renderHome = () => {
-    const scapes = [
-      { id: 'favorites', name: 'Favorites', kind: 'Yours', tracks: favoriteTracks, open: () => goTo('favorites') },
+    const collectionItems = [
+      { id: 'favorites', name: 'Favorites', kind: 'Playlist', tracks: favoriteTracks, open: () => goTo('favorites') },
       ...playlists.map((playlist) => ({
         id: playlist.id,
         name: playlist.name,
-        kind: playlist.dynamic ? 'Library' : 'Playlist',
+        kind: playlist.dynamic ? 'Uploads' : 'Playlist',
         tracks: playlist.tracks,
         open: () => openPlaylist(playlist.id)
+      })),
+      ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({
+        id: mix.savedId || mix.id,
+        name: mix.name,
+        kind: 'Mixes',
+        tracks: mix.tracks,
+        open: () => startPlayback(mix.tracks, 0, mix.name)
       }))
     ];
-
-    const spotlightTrack = current || recentTracks[0] || favoriteTracks[0] || allTracks[0];
+    const filteredCollection = collectionItems.filter((item) => collectionFilter === 'all' || item.kind.toLowerCase() === collectionFilter);
+    const spotlightTrack = featuredTrack || current || recentHistoryTracks[0] || favoriteTracks[0] || allTracks.find((track) => track.audioUrl);
     const spotlightPlaying = Boolean(spotlightTrack && isPlaying && current?.id === spotlightTrack.id);
-    const tint = tintFor(spotlightTrack);
     const playSpotlight = () => {
       if (!spotlightTrack) return;
       if (current && current.id === spotlightTrack.id) {
@@ -2240,9 +2405,19 @@ export default function App() {
       const index = allTracks.findIndex((item) => item.id === spotlightTrack.id);
       if (index >= 0) startPlayback(allTracks, index, 'All Music');
     };
+    const randomizeFeatured = () => {
+      const next = pickRandomFeaturedTrack({
+        catalog: allTracks,
+        recentIds: featuredHistory,
+        lastFeaturedIds: featuredHistory.slice(-2)
+      });
+      if (!next) return;
+      setFeaturedHistory((previous) => [...previous.filter((id) => id !== next.id), next.id].slice(-6));
+      setNotice(`Fresh pick: ${next.title} by ${next.artist}.`);
+    };
     const playRecent = (track) => playFromList(allTracks, allTracks.findIndex((item) => item.id === track.id), 'Recently played');
-    const recentLead = recentTracks[0] || allTracks[0];
-    const recentList = recentTracks.slice(0, 4).length ? recentTracks.slice(0, 4) : allTracks.slice(0, 4);
+    const recentLead = recentHistoryTracks[0] || allTracks[0];
+    const recentList = recentHistoryTracks.slice(0, 4).length ? recentHistoryTracks.slice(0, 4) : allTracks.slice(0, 4);
 
     return (
       <>
@@ -2323,11 +2498,54 @@ export default function App() {
         </section>
 
         <section className="block">
+          <SectionHead title="Daily recommended mix" note="A fresh handpicked stack for today" action={<button type="button" className="text-btn" onClick={() => randomizeFeatured()}>Refresh</button>} />
+          <div className="sleeve-grid">
+            {dailyMix.map((track, index) => (
+              <div key={`${track.id}-${index}`} className="tile">
+                <button type="button" className="tile-hit" onClick={() => startPlayback(dailyMix, index, 'Daily recommended mix')}>
+                  <span className="tile-art">
+                    <span className="peek">
+                      <Record track={track} />
+                    </span>
+                    <CoverArt track={track} size="fill" />
+                    <span className="tile-play">
+                      <Icon name={current?.id === track.id && isPlaying ? 'pause' : 'play'} size={18} />
+                    </span>
+                  </span>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="block">
+          <SectionHead title="Discover" note="Fresh picks from the stack" />
+          <div className="sleeve-grid">
+            {discoverTracks.map((track, index) => (
+              <div key={track.id} className="tile">
+                <button type="button" className="tile-hit" onClick={() => playFromList(discoverTracks, index, 'Discover')}>
+                  <span className="tile-art">
+                    <CoverArt track={track} size="fill" />
+                    <span className="tile-play">
+                      <Icon name="play" size={18} />
+                    </span>
+                  </span>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="block">
           <SectionHead title="Jump back in" note="Recently added to your library" action={<button type="button" className="text-btn" onClick={() => goTo('all-music')}>See everything</button>} />
           <div className="sleeve-grid">
-            {recentTracks.map((track, index) => (
+            {recentHistoryTracks.map((track, index) => (
               <div key={track.id} className="tile">
-                <button type="button" className="tile-hit" onClick={() => playFromList(recentTracks, index, 'Recently added')}>
+                <button type="button" className="tile-hit" onClick={() => playFromList(recentHistoryTracks, index, 'Recently played')}>
                   <span className="tile-art">
                     <span className="peek">
                       <Record track={track} />
@@ -2754,7 +2972,10 @@ export default function App() {
               </label>
             </div>
             <p className="swatch-name">{prefs.accent === 'custom' ? `Custom ${prefs.customAccent.toUpperCase()}` : accentOptions.find((option) => option.id === prefs.accent)?.name}</p>
-            <button type="button" className="text-btn" onClick={() => updatePrefs({ accent: 'poppy' })}>
+            <div className="chips" role="group" aria-label="Color intensity">
+              {['subtle', 'balanced', 'immersive'].map((intensity) => <button key={intensity} type="button" className={`chip ${prefs.accentIntensity === intensity ? 'is-active' : ''}`} aria-pressed={prefs.accentIntensity === intensity} onClick={() => updatePrefs({ accentIntensity: intensity })}>{intensity[0].toUpperCase() + intensity.slice(1)}</button>)}
+            </div>
+            <button type="button" className="text-btn" onClick={() => updatePrefs({ accent: 'poppy', customAccent: '#D83A22', accentIntensity: 'balanced' })}>
               <Icon name="reset" size={14} /> Reset to default
             </button>
           </div>
@@ -2958,6 +3179,59 @@ export default function App() {
     );
   };
 
+  const renderNewHome = () => {
+    const collectionItems = [
+      { id: 'favorites', name: 'Favorites', kind: 'playlists', tracks: favoriteTracks, open: () => goTo('favorites') },
+      ...playlists.map((playlist) => ({ id: playlist.id, name: playlist.name, kind: playlist.dynamic ? 'uploads' : 'playlists', tracks: playlist.tracks, open: () => openPlaylist(playlist.id) })),
+      ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({ id: mix.savedId || mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
+    ];
+    const filteredCollection = collectionItems.filter((item) => collectionFilter === 'all' || item.kind === collectionFilter);
+    const spotlightTrack = (isPlaying && current) || featuredTrack || recentHistoryTracks[0] || favoriteTracks[0] || allTracks.find((track) => track.audioUrl);
+    const playSpotlight = () => {
+      if (!spotlightTrack) return;
+      if (current?.id === spotlightTrack.id) return togglePlay();
+      const index = allTracks.findIndex((track) => track.id === spotlightTrack.id);
+      if (index >= 0) startPlayback(allTracks, index, 'All Music');
+    };
+    const saveMix = async (mix) => {
+      if (!requireAuth('Sign in to save this mix.')) return;
+      try {
+        const response = await authenticatedJsonRequest(`${apiBase}/me/mixes`, { method: 'POST', body: JSON.stringify({ dailyMixId: mix.id, dateKey: dailyRecommendations.dateKey }) });
+        const saved = await response.json();
+        if (!response.ok) throw new Error(saved.message || 'Unable to save this mix.');
+        setDailyRecommendations((previous) => ({ ...previous, mixes: previous.mixes.map((item) => item.id === mix.id ? { ...item, saved: true, savedId: saved.id } : item) }));
+        setNotice('Saved to your collection.');
+      } catch (error) { setNotice(error.message || 'Unable to save this mix.'); }
+    };
+    const playRecent = (track) => playFromList(recentHistoryTracks, recentHistoryTracks.findIndex((item) => item.id === track.id), 'Recently played');
+
+    return (
+      <div className="home-grid">
+        <aside className="home-rail home-dj-rail">
+          <p className="greeting"><i className="live-dot" aria-hidden="true" />{greeting()}, {displayName}</p>
+          <section className="home-panel dj-panel">
+            <SectionHead title="Sonara DJ" note="A new thread through your catalog" />
+            {spotlightTrack ? <>
+              <SleeveStack track={spotlightTrack} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
+              <div className="mini-deck-meta"><span>{isPlaying ? 'Now spinning' : 'Ready on the deck'}</span><strong>{spotlightTrack.title}</strong><small>{spotlightTrack.artist}</small></div>
+              <div className="mini-deck-actions"><button type="button" className="play-fab" onClick={playSpotlight} aria-label={isPlaying ? 'Pause' : 'Play'}><Icon name={isPlaying ? 'pause' : 'play'} size={19} /></button><DjButton active={djOn} onClick={toggleDj} /><button type="button" className={`icon-btn heart ${likedIds.has(spotlightTrack.id) ? 'is-on' : ''}`} onClick={() => toggleLike(spotlightTrack.id)} aria-label="Favorite deck track"><Icon name="heart" size={18} filled={likedIds.has(spotlightTrack.id)} /></button></div>
+              {(current || djOn) && <><TransportControls isPlaying={isPlaying} shuffle={shuffle} repeat={repeat} disabled={!current} onToggle={togglePlay} onNext={() => advance(false)} onPrevious={previous} onShuffle={toggleShuffle} onRepeat={cycleRepeat} /><SeekBar position={position} total={total} onSeek={seekTo} disabled={!current} /></>}
+            </> : <EmptyState icon="music" title="No music yet" text="Upload a track to put something on the deck." />}
+          </section>
+          {djOn && upNext.length > 0 && <section className="home-panel coming-up"><SectionHead title="Coming up" /><ol>{upNext.map(({ track, index }) => <li key={track.id}><button type="button" onClick={() => jumpTo(index)}><CoverArt track={track} size="sm" /><span><strong>{track.title}</strong><small>{track.artist}</small></span></button></li>)}</ol></section>}
+        </aside>
+
+        <main className="home-main">
+          <section className="home-section mixes-section"><SectionHead title={authUser ? `Picked for ${displayName}` : 'Picked for today'} note="Recommended" />{dailyRecommendations.state === 'loading' && <div className="shelf-skeleton" aria-label="Loading recommendations" />}{dailyRecommendations.state === 'error' && <EmptyState icon="refresh" title="Recommendations are resting" text="Try again when the catalog is reachable." action={<button type="button" className="btn" onClick={() => setRecommendationRefresh((value) => value + 1)}>Retry</button>} />}{dailyRecommendations.state === 'ready' && <div className="mix-shelf" tabIndex="0">{recommendedMixes.map((mix, index) => <article key={mix.id} className="recommendation-card"><button type="button" className="recommendation-art" onClick={() => startPlayback(mix.tracks, 0, mix.name, true)} aria-label={`Play ${mix.name}`}><span className="mix-stamp">No. {String(index + 1).padStart(2, '0')}</span><CoverArt track={mix.tracks[0]} size="fill" /><span className="tile-play"><Icon name="play" size={18} /></span></button><span className="feature-kicker">Recommended</span><strong>{mix.name}</strong><small>{mix.tracks.length} songs · {totalRuntime(mix.tracks)}</small><button type="button" className={`icon-btn heart ${mix.saved ? 'is-on' : ''}`} onClick={() => saveMix(mix)} aria-label={mix.saved ? 'Saved mix' : `Save ${mix.name}`}><Icon name="heart" size={18} filled={mix.saved} /></button></article>)}</div>}{dailyRecommendations.state === 'ready' && recommendedMixes.length < 10 && <p className="mix-footnote">Add more music to unlock 10 mixes.</p>}</section>
+          <section className="home-section collection-section"><SectionHead title="Your collection" note="Playlists, uploads, and saved mixes" /><div className="chips" role="group" aria-label="Collection filter">{[['all', 'All'], ['mixes', 'Mixes'], ['playlists', 'Playlists'], ['uploads', 'Uploads']].map(([id, label]) => <button key={id} type="button" className={`chip ${collectionFilter === id ? 'is-active' : ''}`} aria-pressed={collectionFilter === id} onClick={() => setCollectionFilter(id)}>{label}</button>)}</div><div className="collection-grid">{filteredCollection.slice(0, 12).map((item) => <article key={item.id} className="collection-tile"><button type="button" onClick={item.open}><CoverArt track={item.tracks[0] || { id: item.id }} size="sm" /><span><strong>{item.name}</strong><small>{item.kind} · {plural(item.tracks.length, 'track')}</small></span></button><button type="button" className="tile-fab" disabled={!item.tracks.length} onClick={() => startPlayback(item.tracks, 0, item.name)} aria-label={`Play ${item.name}`}><Icon name="play" size={16} /></button></article>)}</div></section>
+          <section className="home-section discover-section"><SectionHead title="Discover" note="A fresh handful from your catalog" /><div className="sleeve-grid">{discoverTracks.map((track, index) => <div key={track.id} className="tile"><button type="button" className="tile-hit" onClick={() => playFromList(discoverTracks, index, 'Discover')}><span className="tile-art"><CoverArt track={track} size="fill" /><span className="tile-play"><Icon name="play" size={18} /></span></span><strong>{track.title}</strong><small>{track.artist}</small></button></div>)}</div></section>
+        </main>
+
+        <aside className="home-rail home-history-rail"><section className="home-panel history-panel"><SectionHead title="Recently played" action={<button type="button" className="text-btn" onClick={() => setPlayHistory([])}>Clear</button>} />{recentHistoryTracks.length ? <ol className="history-list">{recentHistoryTracks.slice(0, 15).map((track, index) => <li key={track.id}><button type="button" onClick={() => playRecent(track)}><CoverArt track={track} size="sm" /><span><strong>{track.title}</strong><small>{track.artist}</small></span><time>{relativeTime(playHistory[index]?.at)}</time><i className={current?.id === track.id && isPlaying ? 'is-playing' : ''} /></button></li>)}</ol> : <><EmptyState icon="clock" title="Nothing played yet" text="Play something and it will show up here." /><div className="new-arrivals"><strong>New arrivals</strong>{recentlyAddedTracks.slice(0, 5).map((track) => <button key={track.id} type="button" onClick={() => playFromList(recentlyAddedTracks, recentlyAddedTracks.indexOf(track), 'New arrivals')}><CoverArt track={track} size="sm" /><span>{track.title}</span></button>)}</div></>}</section></aside>
+      </div>
+    );
+  };
+
   const pageContent = {
     'all-music': renderAllMusic,
     library: renderLibrary,
@@ -2976,7 +3250,7 @@ export default function App() {
       <audio
         ref={audioRef}
         preload="metadata"
-        onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
+        onTimeUpdate={handleAudioTimeUpdate}
         onLoadedMetadata={(event) => {
           const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
           setAudioDuration(dur);
@@ -2995,7 +3269,10 @@ export default function App() {
             return next;
           });
         }}
-        onEnded={() => advanceRef.current(true)}
+        onEnded={(event) => {
+          recordPlaybackProgress(current, event.currentTarget.currentTime, event.currentTarget.duration || current?.seconds || 0, true);
+          advanceRef.current(true);
+        }}
         onError={() => {
           if (current?.src) {
             setIsPlaying(false);
@@ -3068,7 +3345,7 @@ export default function App() {
       <main className={`page ${view === 'home' ? 'is-home' : ''}`}>
         <CatalogNotice status={catalogStatus} onRetry={() => fetchCatalog()} />
         {view === 'home' ? (
-          renderHome()
+          renderNewHome()
         ) : (
           <>
             <PageBanner id={view} title={pageMeta[view]?.title} subtitle={subtitle} />
@@ -3163,22 +3440,14 @@ export default function App() {
           .filter((item) => mobileTabs.includes(item.id))
           .map((item) => (
             <button key={item.id} type="button" className={view === item.id ? 'is-active' : ''} aria-current={view === item.id ? 'page' : undefined} onClick={() => goTo(item.id)}>
-              <Icon name={item.icon} size={22} />
+              <Icon name={item.icon} size={18} />
               <span>{item.label}</span>
             </button>
           ))}
       </nav>
 
       {authOpen && (
-        <AuthDialog
-          mode={authMode}
-          reason={authReason}
-          hasAdmin={hasAdmin}
-          onClaimAdmin={handleClaimAdmin}
-          onClose={() => setAuthOpen(false)}
-          onSignedIn={handleAuthSuccess}
-          onModeChange={setAuthMode}
-        />
+        <AuthDialog mode={authMode} reason={authReason} hasAdmin={hasAdmin} onClaimAdmin={handleClaimAdmin} onClose={() => setAuthOpen(false)} onSignedIn={handleAuthSuccess} onModeChange={setAuthMode} />
       )}
 
       {usernameOpen && <UsernameDialog onComplete={async (profile) => {
@@ -3190,61 +3459,21 @@ export default function App() {
 
       {playlistMenuTrack && (
         <div className="playlist-menu" role="dialog" aria-label={`Add ${playlistMenuTrack.title} to a playlist`}>
-          <div className="playlist-menu-head">
-            <strong>Add “{playlistMenuTrack.title}”</strong>
-            <button type="button" className="icon-btn" onClick={() => setPlaylistMenuTrack(null)} aria-label="Close playlist menu">
-              <Icon name="x" size={18} />
-            </button>
-          </div>
-          <div className="playlist-menu-list">
-            {userPlaylists.length ? userPlaylists.map((playlist) => (
-              <button key={playlist.id} type="button" className="playlist-option" onClick={() => handleAddTrackToPlaylist(playlist.id, playlistMenuTrack.id)}>
-                <span>{playlist.name}</span>
-                <small>{plural(playlist.trackIds?.length || playlist.tracks?.length || 0, 'track')}</small>
-              </button>
-            )) : <p className="muted-text">Create a playlist to save this song.</p>}
-          </div>
-          <div className="playlist-menu-form">
-            <input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="New playlist name" aria-label="New playlist name" />
-            <button type="button" className="btn btn-primary" onClick={() => { if (playlistDraft.trim()) { handleCreatePlaylist(playlistDraft); } else { setPlaylistComposer({ mode: 'create', playlistId: null, name: '' }); setPlaylistDraft(''); } }}>
-              Create
-            </button>
-          </div>
+          <div className="playlist-menu-head"><strong>Add “{playlistMenuTrack.title}”</strong><button type="button" className="icon-btn" onClick={() => setPlaylistMenuTrack(null)} aria-label="Close playlist menu"><Icon name="x" size={18} /></button></div>
+          <div className="playlist-menu-list">{userPlaylists.length ? userPlaylists.map((playlist) => <button key={playlist.id} type="button" className="playlist-option" onClick={() => handleAddTrackToPlaylist(playlist.id, playlistMenuTrack.id)}><span>{playlist.name}</span><small>{plural(playlist.trackIds?.length || playlist.tracks?.length || 0, 'track')}</small></button>) : <p className="muted-text">Create a playlist to save this song.</p>}</div>
+          <div className="playlist-menu-form"><input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="New playlist name" aria-label="New playlist name" /><button type="button" className="btn btn-primary" onClick={() => { if (playlistDraft.trim()) handleCreatePlaylist(playlistDraft); else { setPlaylistComposer({ mode: 'create', playlistId: null, name: '' }); setPlaylistDraft(''); } }}>Create</button></div>
         </div>
       )}
 
       {playlistComposer && (
         <div className="playlist-editor" role="dialog" aria-label={playlistComposer.mode === 'rename' ? 'Rename playlist' : 'Create playlist'}>
-          <div className="playlist-menu-head">
-            <strong>{playlistComposer.mode === 'rename' ? 'Rename playlist' : 'New playlist'}</strong>
-            <button type="button" className="icon-btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }} aria-label="Close playlist editor">
-              <Icon name="x" size={18} />
-            </button>
-          </div>
-          <label className="playlist-editor-field">
-            <span>Playlist name</span>
-            <input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="Weekend drives" aria-label="Playlist name" />
-          </label>
-          <div className="playlist-editor-actions">
-            <button type="button" className="btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }}>
-              Cancel
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => {
-              if (!playlistDraft.trim()) return;
-              if (playlistComposer.mode === 'rename') handleRenamePlaylist(playlistComposer.playlistId, playlistDraft);
-              else handleCreatePlaylist(playlistDraft);
-            }}>
-              {playlistComposer.mode === 'rename' ? 'Save' : 'Create'}
-            </button>
-          </div>
+          <div className="playlist-menu-head"><strong>{playlistComposer.mode === 'rename' ? 'Rename playlist' : 'New playlist'}</strong><button type="button" className="icon-btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }} aria-label="Close playlist editor"><Icon name="x" size={18} /></button></div>
+          <label className="playlist-editor-field"><span>Playlist name</span><input type="text" value={playlistDraft} onChange={(event) => setPlaylistDraft(event.target.value)} placeholder="Weekend drives" aria-label="Playlist name" /></label>
+          <div className="playlist-editor-actions"><button type="button" className="btn" onClick={() => { setPlaylistComposer(null); setPlaylistDraft(''); }}>Cancel</button><button type="button" className="btn btn-primary" onClick={() => { if (!playlistDraft.trim()) return; if (playlistComposer.mode === 'rename') handleRenamePlaylist(playlistComposer.playlistId, playlistDraft); else handleCreatePlaylist(playlistDraft); }}>{playlistComposer.mode === 'rename' ? 'Save' : 'Create'}</button></div>
         </div>
       )}
 
-      {notice && (
-        <div className="toast" role="status">
-          {notice}
-        </div>
-      )}
+      {notice && <div className="toast" role="status">{notice}</div>}
     </div>
   );
 }

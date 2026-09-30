@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.lifecycle.AndroidViewModel
 
 class ThemeViewModel(application: Application) : AndroidViewModel(application) {
@@ -22,6 +23,9 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Custom accent color in hex
     var customAccentHex by mutableStateOf(prefs.getString("custom_accent_hex", "#D83A22") ?: "#D83A22")
+        private set
+
+    var accentIntensity by mutableStateOf(prefs.getString("accent_intensity", "balanced") ?: "balanced")
         private set
 
     // Display options
@@ -69,6 +73,12 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
     val secondary: Color
         get() = getAccentColor(themeMode == "dark").copy(alpha = 0.7f)
 
+    val accentSoft: Color
+        get() = lerp(if (themeMode == "dark") SonaraDesign.DarkPaper else SonaraDesign.LightPaper, primary, when (accentIntensity) { "immersive" -> 0.14f; "subtle" -> 0.04f; else -> 0.08f })
+
+    val surfaceTint: Color
+        get() = lerp(if (themeMode == "dark") SonaraDesign.DarkBg else SonaraDesign.LightBg, primary, when (accentIntensity) { "immersive" -> 0.14f; "subtle" -> 0.04f; else -> 0.08f })
+
     val textColor: Color
         get() = if (themeMode == "dark") SonaraDesign.DarkText else SonaraDesign.LightText
 
@@ -89,6 +99,11 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
             .putString("custom_accent_hex", hex)
             .putString("accent_selection", "custom")
             .apply()
+    }
+
+    fun updateAccentIntensity(value: String) {
+        accentIntensity = value
+        prefs.edit().putString("accent_intensity", value).apply()
     }
 
     fun toggleWaveforms(enabled: Boolean) {
@@ -120,6 +135,7 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
         themeMode = "light"
         accentSelection = "poppy"
         customAccentHex = "#D83A22"
+        accentIntensity = "balanced"
         showWaveforms = true
         compactRows = false
         spinRecords = true
@@ -127,6 +143,7 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
             .putString("theme_mode", "light")
             .putString("accent_selection", "poppy")
             .putString("custom_accent_hex", "#D83A22")
+            .putString("accent_intensity", "balanced")
             .putBoolean("show_waveforms", true)
             .putBoolean("compact_rows", false)
             .putBoolean("spin_records", true)
