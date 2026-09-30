@@ -572,7 +572,7 @@ strong {
 .page {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 32px 40px 170px;
+  padding: 32px 40px calc(170px + env(safe-area-inset-bottom));
 }
 
 .banner {
@@ -3538,14 +3538,19 @@ strong {
 /* Home stage: shelves own their overflow so the page never becomes wider than the viewport. */
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr) minmax(230px, 290px);
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(260px, 300px);
   gap: 28px;
   align-items: start;
+  min-width: 0;
+}
+.home-grid > * {
+  min-width: 0;
 }
 .home-rail {
   min-width: 0;
   position: sticky;
   top: 92px;
+  align-self: start;
   display: grid;
   gap: 18px;
 }
@@ -3617,6 +3622,8 @@ strong {
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scroll-snap-type: x mandatory;
+  min-width: 0;
+  max-width: 100%;
 }
 .recommendation-card { position: relative; min-width: 0; scroll-snap-align: start; }
 .recommendation-art { position: relative; display: block; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 10px; background: var(--raised); }
@@ -3649,13 +3656,14 @@ strong {
 .new-arrivals > strong { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .new-arrivals button { color: var(--ink); font-size: 13px; }
 
-@media (max-width: 1239px) {
-  .home-grid { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); }
+@media (min-width: 860px) and (max-width: 1239px) {
+  .home-grid { grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); }
   .home-history-rail { position: static; grid-column: 2; }
   .home-history-rail .home-panel { width: 100%; }
   .home-dj-rail { grid-row: 1 / span 2; }
 }
 @media (max-width: 859px) {
+  .page { padding-bottom: calc(220px + env(safe-area-inset-bottom)); }
   .home-grid { display: block; }
   .home-rail { position: static; margin-bottom: 28px; }
   .home-dj-rail { display: block; }
