@@ -22,3 +22,14 @@ test('extreme custom colors remain readable and intensity changes tint strength'
     assert.notEqual(subtle.tintBg, immersive.tintBg);
   }
 });
+
+test('derived neutral lines stay below the hairline contrast bound', () => {
+  const accents = ['#D83A22', '#B7791F', '#4D6B3F', '#2F4B6E', '#2F7470', '#2B2A27', '#7A2C91', '#ffffff', '#000000', '#ffff00', '#0000ff'];
+  for (const mode of ['light', 'dark']) {
+    for (const accent of accents) {
+      const palette = buildAccentPalette(accent, mode);
+      assert.ok(contrast(palette.tintLine, palette.tintBg) <= 1.5);
+      assert.ok(contrast(palette.tintLine, palette.tintPaper) <= 1.5);
+    }
+  }
+});

@@ -65,7 +65,7 @@ export const buildAccentPalette = (hex, mode = 'light', intensity = 'balanced') 
   const base = mode === 'dark' ? '#15130f' : '#edebe6';
   const paper = mode === 'dark' ? '#1e1b16' : '#f8f6f2';
   const raised = mode === 'dark' ? '#2a2720' : '#e2dfd8';
-  const line = mode === 'dark' ? '#3a362d' : '#d2cec4';
+  const ink = mode === 'dark' ? '#ede9df' : '#16150f';
   const harmony = [0, 0.08, -0.08, 0.5, 0.33, 0.66].map((offset, index) => {
     const toneSaturation = clamp(saturation * (index === 3 ? 0.8 : 1), 0.18, 0.8);
     const toneLightness = clamp(mode === 'dark' ? lightness * 0.9 + 0.08 : lightness * 0.85 + 0.08, 0.22, 0.7);
@@ -80,7 +80,8 @@ export const buildAccentPalette = (hex, mode = 'light', intensity = 'balanced') 
     tintBg: mix(base, accent, tintAmount),
     tintPaper: mix(paper, accent, tintAmount),
     tintRaised: mix(raised, accent, tintAmount),
-    tintLine: mix(line, accent, tintAmount),
+    tintLine: mix(base, ink, 0.08),
+    tintLineSoft: mix(base, ink, 0.05),
     tones: harmony.map((item) => item.color),
     toneForegrounds: harmony.map((item) => item.foreground),
     contrast

@@ -1937,6 +1937,7 @@ export default function App() {
     root.style.setProperty('--tint-paper', palette.tintPaper);
     root.style.setProperty('--tint-raised', palette.tintRaised);
     root.style.setProperty('--tint-line', palette.tintLine);
+    root.style.setProperty('--line-soft', palette.tintLineSoft);
     root.style.setProperty('--bg', palette.tintBg);
     root.style.setProperty('--paper', palette.tintPaper);
     root.style.setProperty('--raised', palette.tintRaised);

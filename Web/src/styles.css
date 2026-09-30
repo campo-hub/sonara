@@ -173,7 +173,7 @@ strong {
   align-items: center;
   gap: 28px;
   padding: 14px 40px;
-  border-bottom: 1px solid var(--ink);
+  border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
 
