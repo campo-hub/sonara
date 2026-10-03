@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import compression from 'compression';
+import cron from 'node-cron';
 import * as mm from 'music-metadata';
 import { randomUUID } from 'node:crypto';
 
@@ -12,7 +14,8 @@ import {
   deriveTrackId,
   mergeTrackMetadata,
   parseTrackMetadataFromName,
-  buildFallbackCatalog
+  buildFallbackCatalog,
+  hasLateMoovBox
 } from './uploadUtils.js';
 import { isStorageConfigured, listObjects, putObject, publicUrlFor } from './storage.js';
 import { upsertTrack, listTracks, storageMode, isMongoConfigured, getDb, trackExists } from './catalogStore.js';
@@ -33,6 +36,7 @@ import { getUserProfile, saveUserProfile, validateUsername } from './userStore.j
 import { generateDailyMixSnapshot, getPlayableTracks } from './recommendationUtils.js';
 
 const app = express();
+app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 
 const memoryDailyMixes = new Map();
@@ -70,15 +74,18 @@ const recommendationCollections = async () => {
   const dailyMixes = db.collection('dailyMixes');
   const mixHistory = db.collection('mixHistory');
   const savedMixes = db.collection('savedMixes');
+  const mixOwners = db.collection('mixOwners');
   await Promise.all([
     dailyMixes.createIndex({ ownerKey: 1, dateKey: 1 }, { unique: true }),
     dailyMixes.createIndex({ createdAt: 1 }, { expireAfterSeconds: 8 * 24 * 60 * 60 }),
     mixHistory.createIndex({ ownerKey: 1 }, { unique: true }),
     mixHistory.createIndex({ updatedAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 }),
     savedMixes.createIndex({ ownerUid: 1, updatedAt: -1 }),
-    savedMixes.createIndex({ ownerUid: 1, 'origin.mixId': 1 }, { unique: true })
+    savedMixes.createIndex({ ownerUid: 1, 'origin.mixId': 1 }, { unique: true }),
+    mixOwners.createIndex({ ownerKey: 1 }, { unique: true }),
+    mixOwners.createIndex({ lastSeenAt: 1 })
   ]);
-  return { dailyMixes, mixHistory, savedMixes };
+  return { dailyMixes, mixHistory, savedMixes, mixOwners };
 };
 
 const getDailySnapshot = async (ownerKey, dateKey) => {
@@ -118,7 +125,7 @@ const createDailySnapshot = async ({ ownerKey, dateKey, catalog, deviceId, uid }
 };
 
 const enrichDailyMixes = async (snapshot, uid) => {
-  const catalog = await listTracks();
+  const catalog = (await getCatalogSnapshot()).tracks;
   const byId = new Map(getPlayableTracks(catalog).map((track) => [track.id, track]));
   const saved = uid ? await listSavedMixes(uid) : [];
   return (snapshot?.mixes || []).map((mix) => {
@@ -143,6 +150,31 @@ const findSavedMix = async (ownerUid, id) => {
   const collections = await recommendationCollections();
   if (!collections) return memorySavedMixes.get(id)?.ownerUid === ownerUid ? memorySavedMixes.get(id) : null;
   return collections.savedMixes.findOne({ ownerUid, id }, { projection: { _id: 0 } });
+};
+
+const touchMixOwner = async ({ ownerKey, timeZone }) => {
+  if (!ownerKey) return;
+  const collections = await recommendationCollections();
+  const payload = { ownerKey, tz: timeZone || 'UTC', lastSeenAt: new Date() };
+  if (!collections) return;
+  await collections.mixOwners.updateOne({ ownerKey }, { $set: payload }, { upsert: true });
+};
+
+export const precomputeDailyMixes = async ({ now = new Date(), budgetMs = 20000 } = {}) => {
+  const collections = await recommendationCollections();
+  if (!collections) return { owners: 0, generated: 0 };
+  const owners = await collections.mixOwners.find({ lastSeenAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }).limit(500).toArray();
+  const catalog = (await getCatalogSnapshot()).tracks;
+  const startedAt = Date.now();
+  let generated = 0;
+  for (const owner of owners) {
+    if (Date.now() - startedAt >= budgetMs) break;
+    const dateKey = getLocalDateKey(owner.tz || 'UTC', new Date(now.getTime() + 2 * 60 * 60 * 1000));
+    if (await getDailySnapshot(owner.ownerKey, dateKey)) continue;
+    await createDailySnapshot({ ownerKey: owner.ownerKey, dateKey, catalog, deviceId: owner.ownerKey.startsWith('d:') ? owner.ownerKey.slice(2) : '', uid: owner.ownerKey.startsWith('u:') ? owner.ownerKey.slice(2) : null });
+    generated += 1;
+  }
+  return { owners: owners.length, generated };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -370,6 +402,48 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const SYNC_RETRY_MS = 60 * 1000;
 let lastSyncAttemptAt = 0;
 let lastSync = { ran: false };
+let catalogCache = { tracks: null, etag: '', loadedAt: 0, promise: null };
+
+const catalogProjection = {
+  _id: 0,
+  id: 1,
+  title: 1,
+  artist: 1,
+  album: 1,
+  duration: 1,
+  cover: 1,
+  audioUrl: 1,
+  objectKey: 1,
+  source: 1,
+  createdAt: 1,
+  addedAt: 1,
+  uploadedBy: 1,
+  uploadedByName: 1,
+  uploadedByEmail: 1
+};
+
+const invalidateCatalogCache = () => {
+  catalogCache = { tracks: null, etag: '', loadedAt: 0, promise: null };
+};
+
+const getCatalogSnapshot = async () => {
+  if (catalogCache.tracks && Date.now() - catalogCache.loadedAt < 30000) return catalogCache;
+  if (!catalogCache.promise) {
+    catalogCache.promise = (async () => {
+      const db = await getDb();
+      const tracks = db
+        ? await db.collection('tracks').find({}, { projection: catalogProjection }).sort({ createdAt: -1 }).toArray()
+        : await listTracks();
+      const body = JSON.stringify({ songs: tracks });
+      catalogCache = { tracks, etag: `"${Buffer.from(body).toString('base64url')}"`, loadedAt: Date.now(), promise: null };
+      return catalogCache;
+    })().catch((error) => {
+      catalogCache.promise = null;
+      throw error;
+    });
+  }
+  return catalogCache.promise;
+};
 
 async function maybeSyncBucket() {
   if (!isStorageConfigured()) return;
@@ -377,6 +451,7 @@ async function maybeSyncBucket() {
   lastSyncAttemptAt = Date.now();
   try {
     const result = await syncBucketIntoCatalog({ listObjects, publicUrlFor, upsertTrack, listTracks });
+    invalidateCatalogCache();
     lastSync = { ran: true, ok: true, at: new Date().toISOString(), ...result };
     console.log('[catalog] bucket sync', result);
   } catch (error) {
@@ -387,11 +462,13 @@ async function maybeSyncBucket() {
   }
 }
 
-app.get('/api/catalog', async (_req, res) => {
+app.get('/api/catalog', async (req, res) => {
   try {
-    await maybeSyncBucket();
-    const tracks = await listTracks();
-    return res.json({ songs: tracks });
+    const snapshot = await getCatalogSnapshot();
+    if (req.headers['if-none-match'] === snapshot.etag) return res.status(304).end();
+    res.set({ ETag: snapshot.etag, 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' });
+    void maybeSyncBucket();
+    return res.json({ songs: snapshot.tracks });
   } catch (error) {
     console.error('[catalog] failed', error);
     return res.status(500).json({ message: 'Unable to load the catalog right now.' });
@@ -441,6 +518,10 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
       // Fix: detect mime by extension instead of forcing audio/mpeg, so
       // M4A/FLAC/OGG/etc. actually parse instead of silently failing.
       const mimeType = detectAudioMimeType(fileName, file.mimetype);
+
+      if (/\.(m4a|m4b|m4r|mp4)$/i.test(fileName) && hasLateMoovBox(file.buffer)) {
+        console.warn(`[upload] ${fileName} has moov after mdat; streaming may be slow. Optimize with ffmpeg -i in.m4a -c copy -movflags +faststart out.m4a`);
+      }
 
       let parsed = null;
       try {
@@ -497,6 +578,7 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
       };
 
       await upsertTrack(track);
+      invalidateCatalogCache();
       tracks.push(track);
     } catch (fileError) {
       console.error(`[upload] failed for ${file.originalname}:`, fileError);
@@ -687,6 +769,7 @@ app.get('/api/recommendations/daily', async (req, res) => {
   try {
     const request = getRecommendationRequest(req);
     if (request.error) return res.status(400).json({ message: request.error });
+    await touchMixOwner(request);
     const catalog = await listTracks();
     let snapshot = await getDailySnapshot(request.ownerKey, request.dateKey);
     if (!snapshot && req.user && request.deviceId) {
@@ -703,7 +786,10 @@ app.get('/api/recommendations/daily', async (req, res) => {
     }
     if (!snapshot) snapshot = await createDailySnapshot({ ...request, catalog, uid: req.user?.uid });
     const mixes = await enrichDailyMixes(snapshot, req.user?.uid);
-    const payload = JSON.stringify({ dateKey: request.dateKey, nextRefreshAt: `${request.dateKey}T23:59:59.999Z`, mixes });
+    const nextDateKey = getLocalDateKey(request.timeZone, new Date(Date.now() + 24 * 60 * 60 * 1000));
+    const nextSnapshot = await getDailySnapshot(request.ownerKey, nextDateKey);
+    const next = nextSnapshot ? await enrichDailyMixes(nextSnapshot, req.user?.uid) : null;
+    const payload = JSON.stringify({ dateKey: request.dateKey, nextRefreshAt: `${request.dateKey}T23:59:59.999Z`, mixes, next: next ? { dateKey: nextDateKey, mixes: next } : null });
     const etag = `"${Buffer.from(payload).toString('base64url')}"`;
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
     res.set('ETag', etag);
@@ -711,6 +797,18 @@ app.get('/api/recommendations/daily', async (req, res) => {
   } catch (error) {
     console.error('[recommendations] daily read failed', error);
     return res.status(500).json({ message: 'Unable to load recommendations right now.' });
+  }
+});
+
+app.post('/api/internal/jobs/daily-mixes', async (req, res) => {
+  const configuredSecret = String(process.env.CRON_SECRET || '');
+  const suppliedSecret = String(req.headers['x-cron-secret'] || '');
+  if (!configuredSecret || suppliedSecret !== configuredSecret) return res.status(401).json({ message: 'Unauthorized.' });
+  try {
+    return res.json({ ok: true, ...(await precomputeDailyMixes()) });
+  } catch (error) {
+    console.error('[recommendations] precompute failed', error);
+    return res.status(500).json({ message: 'Daily mix precompute failed.' });
   }
 });
 
@@ -1063,6 +1161,9 @@ app.use((error, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
+cron.schedule('0 * * * *', () => {
+  precomputeDailyMixes().catch((error) => console.error('[recommendations] hourly precompute failed', error));
+});
 app.listen(port, '0.0.0.0', () => {
   console.log(`Sonara backend running on http://0.0.0.0:${port}`);
   console.log(`Catalog store: ${storageMode()} | Object storage: ${isStorageConfigured() ? 'configured' : 'NOT configured'} | Auth: ${isFirebaseConfigured() ? 'configured' : 'disabled'}`);

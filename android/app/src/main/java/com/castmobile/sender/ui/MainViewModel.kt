@@ -265,7 +265,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Online / Offline Mode State
-    private val apiClient = SonaraApiClient()
+    private val apiClient = SonaraApiClient(application)
 
     var isOnlineMode by mutableStateOf(prefs.getBoolean("is_online_mode", false))
         private set

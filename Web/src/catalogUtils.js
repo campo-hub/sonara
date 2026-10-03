@@ -2,6 +2,7 @@ const CATALOG_CACHE_KEY = 'sonara.web.catalog.v2';
 const LEGACY_CATALOG_CACHE_KEYS = ['sonara.web.catalog.v1'];
 const FEATURED_HISTORY_KEY = 'sonara.web.featured.history.v2';
 const PLAY_HISTORY_KEY = 'sonara.web.play.history.v1';
+const RECOMMENDATIONS_CACHE_KEY = 'sonara.web.recommendations.v1';
 const fallbackMemoryStore = new Map();
 
 const getStorage = () => {
@@ -91,6 +92,21 @@ export const savePlayHistory = (history) => {
   const next = Array.isArray(history) ? history.slice(0, 50) : [];
   writeStoredList(PLAY_HISTORY_KEY, next);
   return next;
+};
+
+export const loadCachedRecommendations = () => {
+  try {
+    const raw = getStorage().getItem(RECOMMENDATIONS_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+export const saveCachedRecommendations = (value) => {
+  if (!value || typeof value !== 'object') return;
+  writeStoredList(RECOMMENDATIONS_CACHE_KEY, value);
 };
 
 export const updatePlayHistory = ({ history = [], trackId, at = Date.now(), maxEntries = 50 } = {}) => {

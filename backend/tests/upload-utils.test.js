@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, detectAudioMimeType, isAudioFile, isImageFile } from '../src/uploadUtils.js';
+import { buildFallbackCatalog, buildObjectKey, buildPublicUrl, detectAudioMimeType, hasLateMoovBox, isAudioFile, isImageFile } from '../src/uploadUtils.js';
 
 test('buildObjectKey preserves folder structure and slugifies names', () => {
   assert.equal(buildObjectKey('album/artist/track.mp3'), 'uploads/album/artist/track.mp3');
@@ -33,4 +33,10 @@ test('audio and image type helpers recognize Sonara supported formats', () => {
 test('M4A files resolve to the correct mime type for metadata parsing', () => {
   assert.equal(detectAudioMimeType('song.m4a'), 'audio/mp4');
   assert.equal(detectAudioMimeType('song.mp3'), 'audio/mpeg');
+});
+
+test('flags MP4 containers whose moov box follows mdat', () => {
+  const box = (type) => Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from(type)]);
+  assert.equal(hasLateMoovBox(Buffer.concat([box('ftyp'), box('moov'), box('mdat')])), false);
+  assert.equal(hasLateMoovBox(Buffer.concat([box('ftyp'), box('mdat'), box('moov')])), true);
 });

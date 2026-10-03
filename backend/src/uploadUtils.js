@@ -43,6 +43,22 @@ export const detectAudioMimeType = (name = '', fallbackMime = '') => {
   return 'application/octet-stream';
 };
 
+export const hasLateMoovBox = (buffer) => {
+  if (!buffer || buffer.length < 16) return false;
+  let offset = 0;
+  let moovOffset = -1;
+  let mdatOffset = -1;
+  while (offset + 8 <= buffer.length) {
+    const size = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (type === 'moov' && moovOffset < 0) moovOffset = offset;
+    if (type === 'mdat' && mdatOffset < 0) mdatOffset = offset;
+    if (!size || size < 8) break;
+    offset += size;
+  }
+  return moovOffset >= 0 && mdatOffset >= 0 && moovOffset > mdatOffset;
+};
+
 /* -------------------------------------------------------------------------- */
 /*  Object keys / URLs                                                        */
 /* -------------------------------------------------------------------------- */

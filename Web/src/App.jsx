@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
-import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
+import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadCachedRecommendations, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveCachedRecommendations, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
 import { buildAccentPalette } from './colorUtils.js';
 
 /* -------------------------------------------------------------------------- */
@@ -22,7 +22,8 @@ const isLocalDev = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].i
 const apiBase = CONFIGURED_API_BASE || (isLocalDev ? 'http://localhost:4000/api' : '');
 const API_MISCONFIGURED = !apiBase;
 const STORAGE_KEY = 'sonara.web.prefs.v2';
-const CATALOG_TIMEOUT_MS = 30000;
+const CATALOG_TIMEOUT_MS = 8000;
+const CATALOG_ETAG_KEY = 'sonara.web.catalog.etag.v1';
 const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
 
@@ -53,11 +54,11 @@ const pickSongs = (payload, depth = 0) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const requestWithTimeout = async (url, ms) => {
+const requestWithTimeout = async (url, ms, headers = {}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+    return await fetch(url, { signal: controller.signal, cache: 'default', headers: { Accept: 'application/json', ...headers } });
   } finally {
     clearTimeout(timer);
   }
@@ -1253,7 +1254,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('name');
   const [collectionFilter, setCollectionFilter] = useState('all');
-  const [dailyRecommendations, setDailyRecommendations] = useState({ state: 'loading', dateKey: '', mixes: [] });
+  const [dailyRecommendations, setDailyRecommendations] = useState(() => ({ state: loadCachedRecommendations() ? 'ready' : 'loading', ...(loadCachedRecommendations() || { dateKey: '', mixes: [], next: null }) }));
   const [recommendationRefresh, setRecommendationRefresh] = useState(0);
   const [prefs, setPrefs] = useState(loadPrefs);
   const [featuredHistory, setFeaturedHistory] = useState(loadFeaturedHistory);
@@ -1423,6 +1424,8 @@ export default function App() {
   const [contextLabel, setContextLabel] = useState('All Music');
 
   const audioRef = useRef(null);
+  const audioSourceRef = useRef('');
+  const nextAudioRef = useRef(null);
   const filesInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const advanceRef = useRef(() => {});
@@ -1711,6 +1714,8 @@ export default function App() {
     const requestId = catalogRequestRef.current;
     const isCurrent = () => catalogRequestRef.current === requestId;
     const cached = getCachedCatalog();
+    let cachedEtag = '';
+    try { cachedEtag = window.localStorage.getItem(CATALOG_ETAG_KEY) || ''; } catch {}
 
     if (API_MISCONFIGURED) {
       // Don't burn a 30s timeout hitting nothing - fail immediately with
@@ -1731,7 +1736,12 @@ export default function App() {
       if (attempt > 0) await sleep(CATALOG_RETRY_DELAYS[attempt - 1]);
       if (!isCurrent()) return;
       try {
-        const response = await requestWithTimeout(`${apiBase}/catalog`, CATALOG_TIMEOUT_MS);
+        const response = await requestWithTimeout(`${apiBase}/catalog`, CATALOG_TIMEOUT_MS, cachedEtag ? { 'If-None-Match': cachedEtag } : {});
+        if (response.status === 304) {
+          if (cached.length) setCatalog(cached);
+          setCatalogStatus({ state: cached.length ? 'cached' : 'loading', message: '' });
+          return;
+        }
         if (!response.ok) {
           const failure = new Error(`Catalog request failed (${response.status})`);
           failure.status = response.status;
@@ -1751,6 +1761,10 @@ export default function App() {
         }
         setCatalog(songs);
         saveCachedCatalog(songs);
+        try {
+          const etag = response.headers.get('ETag');
+          if (etag) window.localStorage.setItem(CATALOG_ETAG_KEY, etag);
+        } catch {}
         setCatalogStatus({ state: 'ready', message: '' });
         return;
       } catch (error) {
@@ -1797,24 +1811,43 @@ export default function App() {
     let active = true;
     const controller = new AbortController();
     const loadRecommendations = async () => {
+      if (API_MISCONFIGURED) return;
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const params = new URLSearchParams({ tz: timeZone, deviceId: getDeviceId() });
       try {
         let token = null;
-        try { token = await getCurrentIdToken(); } catch { token = null; }
+        try {
+          token = await Promise.race([
+            getCurrentIdToken(),
+            new Promise((resolve) => setTimeout(() => resolve(null), 1500))
+          ]);
+        } catch { token = null; }
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
         const response = await fetch(`${apiBase}/recommendations/daily?${params}`, { headers, signal: controller.signal, cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to load recommendations.');
         if (!active) return;
-        setDailyRecommendations({ state: 'ready', dateKey: data.dateKey || '', mixes: Array.isArray(data.mixes) ? data.mixes : [] });
+        const snapshot = { state: 'ready', dateKey: data.dateKey || '', mixes: Array.isArray(data.mixes) ? data.mixes : [], next: data.next || null };
+        setDailyRecommendations(snapshot);
+        saveCachedRecommendations(snapshot);
       } catch (error) {
-        if (active && error.name !== 'AbortError') setDailyRecommendations((previous) => ({ ...previous, state: 'error' }));
+        if (active && error.name !== 'AbortError') setDailyRecommendations((previous) => previous.mixes?.length ? previous : { ...previous, state: 'error' });
       }
     };
     loadRecommendations();
     return () => { active = false; controller.abort(); };
   }, [authUser, recommendationRefresh]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      setDailyRecommendations((previous) => previous.dateKey !== today && previous.next?.dateKey === today
+        ? { ...previous, dateKey: today, mixes: previous.next.mixes, next: null }
+        : previous);
+    }, 300000);
+    return () => clearInterval(timer);
+  }, []);
 
   const recommendedMixes = useMemo(() => dailyRecommendations.mixes.map((mix) => ({
     ...mix,
@@ -1878,7 +1911,13 @@ export default function App() {
   }, [featuredHistory]);
 
   useEffect(() => {
-    savePlayHistory(playHistory);
+    const timer = setTimeout(() => savePlayHistory(playHistory), 5000);
+    const flush = () => savePlayHistory(playHistory);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pagehide', flush);
+    };
   }, [playHistory]);
 
   useEffect(() => {
@@ -2159,11 +2198,14 @@ export default function App() {
     setAudioDuration(0);
     if (!audio) return;
     audio.pause();
-    if (current?.src) {
+    if (current?.src && audioSourceRef.current !== current.src) {
+      audio.preload = 'auto';
       audio.src = current.src;
+      audioSourceRef.current = current.src;
       audio.load();
-    } else {
+    } else if (!current?.src && audioSourceRef.current) {
       audio.removeAttribute('src');
+      audioSourceRef.current = '';
       audio.load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2186,6 +2228,21 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, current?.id]);
+
+  useEffect(() => {
+    const nextTrack = queue[pos + 1];
+    if (!nextTrack?.src || nextTrack.src === current?.src) return undefined;
+    const prefetch = new Audio();
+    prefetch.preload = 'auto';
+    prefetch.src = nextTrack.src;
+    prefetch.load();
+    nextAudioRef.current = prefetch;
+    return () => {
+      prefetch.pause();
+      prefetch.removeAttribute('src');
+      if (nextAudioRef.current === prefetch) nextAudioRef.current = null;
+    };
+  }, [queue, pos, current?.src]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : prefs.volume;
@@ -3287,7 +3344,7 @@ export default function App() {
     <div className={`app-shell ${prefs.compact ? 'is-compact' : ''}`}>
       <audio
         ref={audioRef}
-        preload="metadata"
+        preload="auto"
         onTimeUpdate={handleAudioTimeUpdate}
         onLoadedMetadata={(event) => {
           const dur = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;

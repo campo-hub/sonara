@@ -27,6 +27,22 @@ Daily recommendation snapshots are stored in `dailyMixes` and the rolling covera
 
 The daily generator uses every playable catalog track, produces up to ten non-overlapping mixes, and degrades to fewer mixes when the catalog has fewer than 100 playable songs. With no MongoDB connection, these collections use an in-memory fallback for local development and do not survive a restart.
 
+## Performance and scheduling
+
+`GET /api/catalog` serves a 30-second in-memory snapshot with `ETag`, `Cache-Control`, and compression. R2 bucket reconciliation runs in the background and never blocks that response. Daily recommendations use the same cached playable catalog where possible; the server precomputes upcoming local-day snapshots hourly while awake.
+
+The external scheduler calls `POST /api/internal/jobs/daily-mixes` with the `x-cron-secret` header. Configure `CRON_SECRET` in Render and `SONARA_API_URL` plus `CRON_SECRET` as GitHub Actions secrets. The included workflow also pings `/api/health` every ten minutes. UptimeRobot or cron-job.org can call `/api/health` and the internal job endpoint if GitHub Actions is not suitable.
+
+Render's free tier can still sleep for 30-60 seconds. The only reliable way to remove that cold start is an always-on Render plan; a scheduled pinger only reduces how often it occurs. For audio delivery, attach a custom Cloudflare domain in front of R2 and enable caching rather than relying on an `r2.dev` public URL.
+
+Run the local performance table with:
+
+```bash
+SONARA_API_URL=https://your-api.example/api SONARA_AUDIO_URL=https://your-audio.example/song.m4a node scripts/perf-check.mjs
+```
+
+The audio range row should return `206`, include `Accept-Ranges: bytes`, a correct audio `Content-Type`, cache headers, and the required CORS headers. Existing M4A/MP4 files should be checked for `moov` placement; optimize affected copies with `ffmpeg -i in.m4a -c copy -movflags +faststart out.m4a` without re-encoding them in the app.
+
 ## Run locally
 
 ```bash

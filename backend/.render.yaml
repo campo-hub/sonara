@@ -27,6 +27,8 @@ services:
         sync: false
       - key: MONGODB_DB_NAME
         value: sonara
+      - key: CRON_SECRET
+        sync: false
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL

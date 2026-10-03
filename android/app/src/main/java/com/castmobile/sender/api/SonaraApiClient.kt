@@ -13,6 +13,7 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.InputStream
+import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
@@ -45,8 +46,10 @@ data class UsernameResult(
     val errorMessage: String? = null
 )
 
-class SonaraApiClient {
+class SonaraApiClient(context: Context? = null) {
+    private val diskCache = context?.let { Cache(File(it.cacheDir, "sonara-http"), 20L * 1024L * 1024L) }
     private val client = OkHttpClient.Builder()
+        .cache(diskCache)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
@@ -230,6 +233,7 @@ class SonaraApiClient {
             .url(targetUrl)
             .get()
             .addHeader("Accept", "application/json")
+            .cacheControl(CacheControl.Builder().maxAge(30, TimeUnit.SECONDS).maxStale(5, TimeUnit.MINUTES).build())
             .build()
 
         val response = client.newCall(request).execute()
