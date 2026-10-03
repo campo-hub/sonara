@@ -41,7 +41,18 @@ Run the local performance table with:
 SONARA_API_URL=https://your-api.example/api SONARA_AUDIO_URL=https://your-audio.example/song.m4a node scripts/perf-check.mjs
 ```
 
+| Path | Before | After | Measurement status |
+| --- | --- | --- | --- |
+| Catalog timeout | 30 s plus retries | 8 s background refresh | Client setting verified; live TTFB requires a running deployment |
+| Catalog request path | Awaited full R2 sync | In-memory snapshot, background sync | Code path verified; live timing requires a running deployment |
+| Catalog transfer | No compression or conditional cache | Compression, ETag, 30 s cache, stale-while-revalidate | Headers covered by server code; live response requires a running deployment |
+| Daily mixes | Generated during the request | Hourly precompute plus fast lazy fallback | Scheduler code verified; live timing requires Mongo and a running deployment |
+| Home first paint | Waited for network-backed state | Cached catalog/mixes/history render immediately | Browser timing requires Playwright Chromium and a populated cache |
+| Playback start | Metadata preload and repeated source loads | Auto preload, unchanged-source guard, next-track prefetch | Audio timing requires three real playable URLs |
+
 The audio range row should return `206`, include `Accept-Ranges: bytes`, a correct audio `Content-Type`, cache headers, and the required CORS headers. Existing M4A/MP4 files should be checked for `moov` placement; optimize affected copies with `ffmpeg -i in.m4a -c copy -movflags +faststart out.m4a` without re-encoding them in the app.
+
+The responsive browser command is `npm run qa:layout` from `Web/`. It checks 1440, 1100, 800, and 390 pixel viewports in both themes and writes screenshots to `docs/qa/`; it requires the Playwright Chromium browser to be installed.
 
 ## Run locally
 
