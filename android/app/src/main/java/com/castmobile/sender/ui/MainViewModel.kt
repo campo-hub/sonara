@@ -1357,53 +1357,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startDJ() {
-        if (allTracks.isNotEmpty()) {
-            isDjMode = true
-            djQueue.clear()
-            djHistory.clear()
-            djPosition = 0
-            tracksInCurrentTheme = 0
-            
-            // Build user taste profile
-            userTasteProfile = preferenceEngine.buildProfile(allTracks)
-            
-            // Auto-detect optimal session type
-            djSessionType = sessionPlanner.detectOptimalSessionType(userTasteProfile!!)
-            
-            // Generate theme rotation sequence
-            themeRotation.clear()
-            themeRotation.addAll(sessionPlanner.generateThemeRotation(
-                startType = djSessionType,
-                profile = userTasteProfile!!,
-                count = 5
-            ))
-            currentThemeIndex = 0
-            
-            // Create first theme session plan
-            currentThemeName = sessionPlanner.getThemeDisplayName(themeRotation[currentThemeIndex])
-            currentSessionPlan = sessionPlanner.createThemeSession(
-                type = themeRotation[currentThemeIndex],
-                profile = userTasteProfile!!,
-                trackFeatures = SongAnalyzer.analyzeAll(allTracks),
-                themeIndex = currentThemeIndex,
-                themeName = currentThemeName
+        val tracks = allTracks
+        if (tracks.isEmpty()) return
+        viewModelScope.launch(Dispatchers.Default) {
+            val profile = preferenceEngine.buildProfile(tracks)
+            val sessionType = sessionPlanner.detectOptimalSessionType(profile)
+            val rotation = sessionPlanner.generateThemeRotation(sessionType, profile, 5)
+            val themeIndex = 0
+            val themeName = sessionPlanner.getThemeDisplayName(rotation[themeIndex])
+            val plan = sessionPlanner.createThemeSession(
+                type = rotation[themeIndex],
+                profile = profile,
+                trackFeatures = SongAnalyzer.analyzeAll(tracks),
+                themeIndex = themeIndex,
+                themeName = themeName
             )
-            
-            // Store energy curve for UI
-            djEnergyCurve = currentSessionPlan?.energyCurve ?: emptyList()
-            
-            // Generate intelligent queue for first theme
             val generatedQueue = queueGenerator.generateQueue(
-                allTracks = allTracks,
-                sessionPlan = currentSessionPlan!!,
+                allTracks = tracks,
+                sessionPlan = plan,
                 count = DJSessionPlanner.TRACKS_PER_THEME
             )
-            
-            djQueue.clear()
-            djQueue.addAll(generatedQueue.tracks)
-            
-            playNextDjTrack()
-            showFullPlayer = true
+            withContext(Dispatchers.Main.immediate) {
+                isDjMode = true
+                djQueue.clear()
+                djHistory.clear()
+                djPosition = 0
+                tracksInCurrentTheme = 0
+                userTasteProfile = profile
+                djSessionType = sessionType
+                themeRotation.clear()
+                themeRotation.addAll(rotation)
+                currentThemeIndex = themeIndex
+                currentThemeName = themeName
+                currentSessionPlan = plan
+                djEnergyCurve = plan.energyCurve
+                djQueue.addAll(generatedQueue.tracks)
+                playNextDjTrack()
+                showFullPlayer = true
+            }
         }
     }
 

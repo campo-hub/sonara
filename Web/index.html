@@ -19,6 +19,13 @@
         } catch {}
       })();
     </script>
+    <script type="module">
+      const apiBase = String(import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+      if (apiBase) {
+        try { fetch(`${apiBase}/health`, { cache: 'no-store', credentials: 'omit' }); } catch {}
+        try { document.head.insertAdjacentHTML('beforeend', `<link rel="preconnect" href="${new URL(apiBase).origin}" crossorigin>`); } catch {}
+      }
+    </script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
     <script type="module" src="/src/main.jsx"></script>
