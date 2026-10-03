@@ -3556,8 +3556,16 @@ strong {
 }
 .home-main {
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
   display: grid;
   gap: 36px;
+}
+.home-section {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .home-panel {
   min-width: 0;
@@ -3624,6 +3632,7 @@ strong {
   scroll-snap-type: x mandatory;
   min-width: 0;
   max-width: 100%;
+  width: 100%;
 }
 .recommendation-card { position: relative; min-width: 0; scroll-snap-align: start; }
 .recommendation-art { position: relative; display: block; width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 10px; background: var(--raised); }
@@ -3677,4 +3686,9 @@ strong {
   .home-history-rail { margin-top: 28px; }
   .collection-grid { grid-template-columns: 1fr; }
   .recommendation-art .tile-play { opacity: 1; }
+}
+@media (min-width: 860px) {
+  .dj-panel > .sleeve-stack {
+    width: min(100%, 150px);
+  }
 }
