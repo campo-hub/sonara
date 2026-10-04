@@ -3528,10 +3528,259 @@ strong {
   border-color: var(--accent);
 }
 
+.admin-catalog-panel {
+  display: grid;
+  gap: 22px;
+  margin-bottom: 24px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-soft);
+}
+
+.admin-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.admin-panel-head.compact {
+  align-items: center;
+}
+
+.admin-panel-head h2,
+.admin-panel-head h3 {
+  margin: 3px 0 4px;
+  font-family: var(--font-display);
+}
+
+.admin-panel-head h2 {
+  font-size: clamp(1.35rem, 3vw, 2rem);
+}
+
+.admin-panel-head h3 {
+  font-size: 1.1rem;
+}
+
+.admin-panel-head p {
+  max-width: 620px;
+}
+
+.admin-count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-count-card {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--raised);
+}
+
+.admin-count-card span,
+.admin-count-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-count-card strong {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.admin-count-card.is-waiting {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.admin-count-card.is-review strong {
+  color: #b7791f;
+}
+
+.admin-export-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--paper));
+}
+
+.admin-export-bar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-export-bar span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-export-actions,
+.admin-import-actions,
+.batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-size-control {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.admin-size-control select {
+  min-width: 78px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--text);
+  font: inherit;
+}
+
+.admin-import-box,
+.admin-batch-history {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.admin-import-box textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.admin-preview {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-preview strong {
+  color: var(--text);
+}
+
+.admin-preview.is-error {
+  border: 1px solid var(--danger);
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-table th {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.admin-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-table td:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.batch-stale {
+  color: #b7791f;
+  font-size: 11px;
+}
+
+.batch-status {
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.batch-status.is-complete {
+  color: #2f7470;
+}
+
+.batch-status.is-open,
+.batch-status.is-partial {
+  color: #b7791f;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.admin-empty {
+  padding: 18px 0 4px;
+}
+
 @media (max-width: 859px) {
   .catalog-notice {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .admin-catalog-panel {
+    padding: 17px;
+  }
+
+  .admin-panel-head,
+  .admin-export-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-count-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-export-actions {
+    justify-content: space-between;
   }
 }
 

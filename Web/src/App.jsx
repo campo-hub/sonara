@@ -156,7 +156,7 @@ const pageMeta = {
   favorites: { title: 'Favorites', subtitle: 'The songs you keep coming back to.' },
   upload: { title: 'Add music', subtitle: 'Bring in tracks, albums or whole folders. Big batches go in small groups.' },
   lab: { title: 'Appearance Lab', subtitle: 'Make Sonara look and feel the way you like.' },
-  admin: { title: '👑 Admin Billing', subtitle: 'Cloudflare R2 storage metrics & cost calculator.' }
+  admin: { title: 'Admin', subtitle: 'Storage, catalog genres, and export batches.' }
 };
 
 const sortOptions = [
@@ -822,26 +822,6 @@ const tintFor = (track) => {
   return { bg: base, fg: readableOn(base) === '#0e0e0e' ? '#16150F' : '#F6EFE0' };
 };
 
-/* Says plainly when the songs on screen are samples or a saved copy, and why. */
-function CatalogNotice({ status, onRetry }) {
-  if (!status || status.state === 'ready') return null;
-  if (status.state === 'loading' && !status.message) return null;
-  const titles = { loading: 'Reaching the server…', cached: 'Showing your last saved library', sample: 'Showing sample songs' };
-  return (
-    <div className={`catalog-notice is-${status.state}`} role="status">
-      <div>
-        <strong>{titles[status.state]}</strong>
-        <span>{status.message}</span>
-      </div>
-      {status.state !== 'loading' && (
-        <button type="button" className="btn btn-compact" onClick={onRetry}>
-          Try again
-        </button>
-      )}
-    </div>
-  );
-}
-
 function PageBanner({ id, title, subtitle }) {
   const style = BANNER_STYLES[id] || BANNER_STYLES.library;
   return (
@@ -1285,6 +1265,12 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminStats, setAdminStats] = useState(null);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [adminCounts, setAdminCounts] = useState({ pending: 0, exported: 0, classified: 0, needsReview: 0 });
+  const [adminBatches, setAdminBatches] = useState([]);
+  const [adminExportSize, setAdminExportSize] = useState(200);
+  const [adminCsvText, setAdminCsvText] = useState('');
+  const [adminPreview, setAdminPreview] = useState(null);
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
 
   useEffect(() => {
     fetch(`${apiBase}/admin/check`)
@@ -1320,7 +1306,7 @@ export default function App() {
       if (!res.ok) throw new Error(data.message || 'Unable to claim admin account.');
       setHasAdmin(true);
       setIsAdmin(true);
-      setNotice('👑 Admin Account claimed! Accessing Admin Billing dashboard...');
+      setNotice('Admin account claimed.');
       setView('admin');
       setAuthOpen(false);
     } catch (err) {
@@ -1352,11 +1338,136 @@ export default function App() {
     }
   }, []);
 
+  const loadAdminCatalog = useCallback(async () => {
+    try {
+      const [countResponse, batchesResponse] = await Promise.all([
+        authenticatedJsonRequest(`${apiBase}/admin/catalog/pending-count`),
+        authenticatedJsonRequest(`${apiBase}/admin/catalog/exports`)
+      ]);
+      const counts = await countResponse.json();
+      const batches = await batchesResponse.json();
+      if (!countResponse.ok) throw new Error(counts.message || 'Unable to load catalog status.');
+      if (!batchesResponse.ok) throw new Error(batches.message || 'Unable to load export batches.');
+      setAdminCounts(counts);
+      setAdminBatches(Array.isArray(batches.batches) ? batches.batches : []);
+    } catch (err) {
+      setNotice(err.message || 'Unable to load catalog export status.');
+    }
+  }, []);
+
+  const downloadAdminBatch = useCallback(async (batchId) => {
+    setAdminActionLoading(true);
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/admin/catalog/exports/${encodeURIComponent(batchId)}.csv`);
+      if (!response.ok) throw new Error((await response.json()).message || 'Unable to download this batch.');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `sonara-${batchId}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setNotice(err.message || 'Unable to download this batch.');
+    } finally {
+      setAdminActionLoading(false);
+    }
+  }, []);
+
+  const exportAdminBatch = useCallback(async () => {
+    setAdminActionLoading(true);
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/admin/catalog/exports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchSize: adminExportSize })
+      });
+      if (response.status === 204) {
+        setNotice('No new songs are waiting for genres.');
+        await loadAdminCatalog();
+        return;
+      }
+      if (!response.ok) throw new Error((await response.json()).message || 'Unable to export the next batch.');
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'sonara-export.csv';
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice('Batch exported. Send that CSV to your classifier, then import the completed file below.');
+      await loadAdminCatalog();
+    } catch (err) {
+      setNotice(err.message || 'Unable to export the next batch.');
+    } finally {
+      setAdminActionLoading(false);
+    }
+  }, [adminExportSize, loadAdminCatalog]);
+
+  const previewAdminImport = useCallback(async () => {
+    if (!adminCsvText.trim()) return setNotice('Paste or choose a batch CSV first.');
+    setAdminActionLoading(true);
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/admin/catalog/import/batch/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: adminCsvText })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to preview this batch.');
+      setAdminPreview(data);
+    } catch (err) {
+      setNotice(err.message || 'Unable to preview this batch.');
+    } finally {
+      setAdminActionLoading(false);
+    }
+  }, [adminCsvText]);
+
+  const applyAdminImport = useCallback(async () => {
+    if (!adminPreview?.ok) return;
+    setAdminActionLoading(true);
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/admin/catalog/import/batch/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preview: adminPreview })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Unable to apply this batch.');
+      setAdminPreview(null);
+      setAdminCsvText('');
+      setNotice(`Imported ${data.changed?.length || 0} tracks. ${data.rejected?.invalidGenre?.length || 0} rows still need correction.`);
+      await loadAdminCatalog();
+    } catch (err) {
+      setNotice(err.message || 'Unable to apply this batch.');
+    } finally {
+      setAdminActionLoading(false);
+    }
+  }, [adminPreview, loadAdminCatalog]);
+
+  const updateAdminBatch = useCallback(async (batchId, action) => {
+    setAdminActionLoading(true);
+    try {
+      const response = await authenticatedJsonRequest(`${apiBase}/admin/catalog/exports/${encodeURIComponent(batchId)}/${action}`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || `Unable to ${action} this batch.`);
+      setNotice(action === 'release' ? `Released ${data.released || 0} outstanding tracks.` : `Re-queued ${data.released || 0} outstanding tracks.`);
+      await loadAdminCatalog();
+    } catch (err) {
+      setNotice(err.message || `Unable to ${action} this batch.`);
+    } finally {
+      setAdminActionLoading(false);
+    }
+  }, [loadAdminCatalog]);
+
   useEffect(() => {
     if (view === 'admin' && isAdmin) {
       loadAdminStats();
+      loadAdminCatalog();
     }
-  }, [view, isAdmin, loadAdminStats]);
+  }, [view, isAdmin, loadAdminStats, loadAdminCatalog]);
 
   const handleAuthSuccess = useCallback(async (user, requestedUsername = '') => {
     setAuthUser(user);
@@ -2984,10 +3095,6 @@ export default function App() {
             <li>Big selections are sent in small groups, so you can cancel any time.</li>
             <li>Files that are not audio are skipped automatically.</li>
           </ul>
-          <p className={`server-status ${serverOnline === false ? 'is-offline' : ''}`}>
-            <i />
-            {catalogStatus.state === 'loading' && !catalogStatus.message ? 'Checking server…' : serverOnline ? 'Connected to the Sonara server' : catalogStatus.message || 'Server unreachable. Uploads will fail until it is back.'}
-          </p>
         </div>
 
         <div className="info-box">
@@ -3144,12 +3251,12 @@ export default function App() {
     </>
   );
 
-  const renderAdminBilling = () => {
+  const renderAdmin = () => {
     if (!isAdmin) {
       return (
         <div className="info-box" style={{ padding: '2rem', textAlign: 'center' }}>
           <h3>Access Restricted</h3>
-          <p className="muted-text">Admin privileges are required to view Cloudflare R2 storage billing & metrics.</p>
+          <p className="muted-text">Admin privileges are required to view catalog controls and storage metrics.</p>
         </div>
       );
     }
@@ -3169,6 +3276,49 @@ export default function App() {
 
     return (
       <div className="admin-dashboard">
+        <section className="admin-catalog-panel">
+          <div className="admin-panel-head">
+            <div>
+              <span className="feature-kicker">Catalog & Genres</span>
+              <h2>Keep the classifier queue moving</h2>
+              <p className="muted-text">New uploads enter the queue automatically. A track can only belong to one export batch at a time.</p>
+            </div>
+            <button type="button" className="btn btn-sm" onClick={loadAdminCatalog} disabled={adminActionLoading}>Refresh queue</button>
+          </div>
+
+          <div className="admin-count-grid">
+            <div className="admin-count-card is-waiting"><span>Waiting for genres</span><strong>{adminCounts.pending}</strong><small>next export candidates</small></div>
+            <div className="admin-count-card"><span>Exported</span><strong>{adminCounts.exported}</strong><small>awaiting returned CSVs</small></div>
+            <div className="admin-count-card"><span>Classified</span><strong>{adminCounts.classified}</strong><small>available to mixes</small></div>
+            <div className="admin-count-card is-review"><span>Needs review</span><strong>{adminCounts.needsReview}</strong><small>low-confidence results</small></div>
+          </div>
+
+          <div className="admin-export-bar">
+            <div>
+              <strong>{adminCounts.pending} new songs waiting for genres</strong>
+              <span>Exporting claims them so a later export cannot repeat them.</span>
+            </div>
+            <div className="admin-export-actions">
+              <label className="admin-size-control">Batch size<select value={adminExportSize} onChange={(event) => setAdminExportSize(Number(event.target.value))}><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="500">500</option></select></label>
+              <button type="button" className="btn btn-primary" onClick={exportAdminBatch} disabled={!adminCounts.pending || adminActionLoading}>Export next batch</button>
+            </div>
+          </div>
+
+          <div className="admin-import-grid">
+            <div className="admin-import-box">
+              <div className="admin-panel-head compact"><div><h3>Import classified batch</h3><p className="muted-text">Only a CSV carrying a known batch ID can be applied.</p></div><label className="btn btn-sm">Choose CSV<input type="file" accept=".csv,text/csv" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) setAdminCsvText(await file.text()); event.target.value = ''; }} /></label></div>
+              <textarea value={adminCsvText} onChange={(event) => setAdminCsvText(event.target.value)} placeholder="Paste the completed batch CSV here" aria-label="Batch CSV" />
+              <div className="admin-import-actions"><button type="button" className="btn" onClick={previewAdminImport} disabled={!adminCsvText.trim() || adminActionLoading}>Preview import</button>{adminPreview?.ok && <button type="button" className="btn btn-primary" onClick={applyAdminImport} disabled={adminActionLoading}>Apply {adminPreview.accepted.length} rows</button>}</div>
+              {adminPreview && <div className={`admin-preview ${adminPreview.ok ? 'is-ok' : 'is-error'}`}><strong>{adminPreview.ok ? `Batch ${adminPreview.batchId} recognized` : 'Import blocked'}</strong><span>{adminPreview.accepted.length} accepted · {adminPreview.rejected.invalidGenre.length} invalid genre · {adminPreview.rejected.wrongBatch.length} wrong batch · {adminPreview.rejected.unknownId.length} unknown track</span></div>}
+            </div>
+          </div>
+
+          <div className="admin-batch-history">
+            <div className="admin-panel-head compact"><div><h3>Export batches</h3><p className="muted-text">Re-download a lost CSV or deliberately return outstanding tracks to the queue.</p></div></div>
+            {adminBatches.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Batch</th><th>Date</th><th>Size</th><th>Imported</th><th>Outstanding</th><th>Status</th><th /></tr></thead><tbody>{adminBatches.map((batch) => <tr key={batch.batchId}><td><strong>{batch.batchId}</strong>{batch.stale && <small className="batch-stale">Older than 7 days</small>}</td><td>{new Date(batch.createdAt).toLocaleDateString()}</td><td>{batch.exported}</td><td>{batch.imported}</td><td>{batch.outstanding}</td><td><span className={`batch-status is-${batch.status}`}>{batch.status}</span></td><td><div className="batch-actions"><button type="button" className="text-btn" onClick={() => downloadAdminBatch(batch.batchId)} disabled={adminActionLoading}>Re-download</button>{batch.outstanding > 0 && <><button type="button" className="text-btn" onClick={() => updateAdminBatch(batch.batchId, 'requeue-outstanding')} disabled={adminActionLoading}>Re-queue</button><button type="button" className="text-btn danger-text" onClick={() => updateAdminBatch(batch.batchId, 'release')} disabled={adminActionLoading}>Release</button></>}</div></td></tr>)}</tbody></table></div> : <p className="muted-text admin-empty">No export batches yet.</p>}
+          </div>
+        </section>
+
         <div className="info-box" style={{ marginBottom: '1.5rem', background: 'var(--paper)', borderRadius: '16px', padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <div>
@@ -3334,7 +3484,7 @@ export default function App() {
     favorites: renderFavorites,
     upload: renderUpload,
     lab: renderLab,
-    admin: renderAdminBilling
+    admin: renderAdmin
   };
 
   const subtitle = view === 'all-music' ? (query ? `${plural(visibleTracks.length, 'result')} for “${query}”` : plural(allTracks.length, 'track')) : pageMeta[view]?.subtitle;
@@ -3392,7 +3542,7 @@ export default function App() {
             ))}
           {isAdmin && (
             <button type="button" className={`mnav ${view === 'admin' ? 'is-active' : ''}`} style={{ color: '#FFD700', fontWeight: 'bold' }} onClick={() => goTo('admin')}>
-              👑 Admin Billing
+              Admin
             </button>
           )}
         </nav>
@@ -3438,7 +3588,6 @@ export default function App() {
       </header>
 
       <main className={`page ${view === 'home' ? 'is-home' : ''}`}>
-        <CatalogNotice status={catalogStatus} onRetry={() => fetchCatalog()} />
         {view === 'home' ? (
           renderNewHome()
         ) : (
