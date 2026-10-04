@@ -18,7 +18,22 @@ import {
   hasLateMoovBox
 } from './uploadUtils.js';
 import { isStorageConfigured, listObjects, putObject, publicUrlFor } from './storage.js';
-import { upsertTrack, listTracks, storageMode, isMongoConfigured, getDb, trackExists } from './catalogStore.js';
+import {
+  upsertTrack,
+  listTracks,
+  storageMode,
+  isMongoConfigured,
+  getDb,
+  trackExists,
+  migrateGenreStatuses,
+  claimPendingTracks,
+  getTrackById,
+  updateTrackIf,
+  saveExportBatch,
+  getExportBatch,
+  listExportBatches,
+  updateExportBatch
+} from './catalogStore.js';
 import { buildEmptyLibraryPayload, mergeLibraryData, normalizeLibraryData } from './libraryUtils.js';
 import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
 import { getAdminConfig, claimAdmin, isAdminUser } from './adminStore.js';
@@ -34,6 +49,8 @@ import {
 } from './playlistStore.js';
 import { getUserProfile, saveUserProfile, validateUsername } from './userStore.js';
 import { generateDailyMixSnapshot, getPlayableTracks } from './recommendationUtils.js';
+import { getAllowedGenres, normalizeGenre } from './genres.js';
+import { buildGenreAwareDailyMix, exportCatalogCsv } from './genreMixUtils.js';
 
 const app = express();
 app.use(compression());
@@ -311,19 +328,7 @@ function getMixDateKey(date = new Date()) {
 }
 
 function buildDailyMixForCatalog({ catalog = [], userId = 'guest', dateKey = getMixDateKey(), limit = 5 } = {}) {
-  const tracks = Array.isArray(catalog) ? catalog.filter((track) => track && track.id && (track.audioUrl || track.audio_url || track.src)) : [];
-  if (!tracks.length) return [];
-
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 5, tracks.length));
-  const seed = `${dateKey}:${String(userId || 'guest')}`;
-  const ranked = tracks.map((track) => ({
-    ...track,
-    _score: hashMixSeed(`${seed}:${track.id}:${track.title || ''}:${track.artist || ''}`)
-  })).sort((left, right) => left._score - right._score)
-    .slice(0, safeLimit)
-    .map(({ _score, ...track }) => track);
-
-  return ranked;
+  return buildGenreAwareDailyMix({ catalog, userId, dateKey, limit });
 }
 
 /**
@@ -419,7 +424,15 @@ const catalogProjection = {
   addedAt: 1,
   uploadedBy: 1,
   uploadedByName: 1,
-  uploadedByEmail: 1
+  uploadedByEmail: 1,
+  genre: 1,
+  subgenres: 1,
+  mood: 1,
+  energy: 1,
+  language: 1,
+  genreSource: 1,
+  genreConfidence: 1,
+  genreUpdatedAt: 1
 };
 
 const invalidateCatalogCache = () => {
@@ -473,6 +486,514 @@ app.get('/api/catalog', async (req, res) => {
     console.error('[catalog] failed', error);
     return res.status(500).json({ message: 'Unable to load the catalog right now.' });
   }
+});
+
+app.get('/api/admin/genres/vocabulary', requireAdmin, async (_req, res) => {
+  const genres = getAllowedGenres();
+  return res.json({ genres, count: genres.length, normalizeGenre });
+});
+
+app.get('/api/genres', async (_req, res) => {
+  try {
+    const tracks = await listTracks();
+    const summary = new Map();
+    for (const track of tracks) {
+      const genre = normalizeGenre(track.genre) || 'Unsorted';
+      summary.set(genre, (summary.get(genre) || 0) + 1);
+    }
+    const payload = [...summary.entries()].map(([genre, count]) => ({ genre, trackCount: count })).sort((left, right) => right.trackCount - left.trackCount || left.genre.localeCompare(right.genre));
+    return res.json(payload);
+  } catch (error) {
+    console.error('[genres] summary failed', error);
+    return res.status(500).json({ message: 'Unable to load genre summary.' });
+  }
+});
+
+app.get('/api/recommendations/genre/:genre', async (req, res) => {
+  try {
+    const genre = normalizeGenre(req.params.genre) || 'Unsorted';
+    const tracks = await listTracks();
+    const items = tracks.filter((track) => (normalizeGenre(track.genre) || 'Unsorted') === genre).slice(0, 100);
+    return res.json({ genre, tracks: items });
+  } catch (error) {
+    console.error('[genres] browsing failed', error);
+    return res.status(500).json({ message: 'Unable to load genre recommendation.' });
+  }
+});
+
+const catalogImportHistory = [];
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
+
+const makeExportBatchId = () => {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z').slice(0, 15);
+  return `b-${stamp}-${randomUUID().slice(0, 4)}`;
+};
+
+const getBatchCounts = async (batchId) => {
+  const tracks = (await listTracks()).filter((track) => track.exportBatchId === batchId);
+  return {
+    exported: tracks.length,
+    imported: tracks.filter((track) => ['classified', 'needs_review'].includes(track.genreStatus)).length,
+    outstanding: tracks.filter((track) => track.genreStatus === 'exported').length
+  };
+
+};
+
+const updateBatchStatus = async (batchId) => {
+  const counts = await getBatchCounts(batchId);
+  const current = await getExportBatch(batchId);
+  if (!current) return null;
+  const status = counts.outstanding === 0 ? 'complete' : counts.imported ? 'partial' : 'open';
+  return updateExportBatch(batchId, { ...counts, status });
+};
+
+const parseBatchImport = async (rawCsv, { overwrite = false } = {}) => {
+  const rows = parseCsvRows(rawCsv);
+  const batchIds = [...new Set(rows.map((row) => String(row.batchId || '').trim()).filter(Boolean))];
+  const batchId = batchIds.length === 1 ? batchIds[0] : '';
+  const batch = batchId ? await getExportBatch(batchId) : null;
+  const accepted = [];
+  const rejected = { notExported: [], alreadyClassified: [], wrongBatch: [], unknownId: [], invalidGenre: [] };
+
+  for (const [index, row] of rows.entries()) {
+    const id = String(row.id || '').trim();
+    const track = id ? await getTrackById(id) : null;
+    const rowNumber = index + 2;
+    if (!track) {
+      rejected.unknownId.push({ row: rowNumber, id });
+      continue;
+    }
+    if (track.genreStatus === 'classified' || track.genreStatus === 'needs_review') {
+      if (!overwrite) rejected.alreadyClassified.push({ row: rowNumber, id });
+    }
+    if (!batch || !batchIds.includes(String(row.batchId || '').trim()) || track.exportBatchId !== batchId) {
+      rejected.wrongBatch.push({ row: rowNumber, id });
+      continue;
+    }
+    if (track.genreStatus === 'pending') {
+      rejected.notExported.push({ row: rowNumber, id });
+      continue;
+    }
+    if (track.genreStatus !== 'exported' && !overwrite) continue;
+
+    const genre = normalizeGenre(row.genre);
+    if (!genre) {
+      rejected.invalidGenre.push({ row: rowNumber, id, genre: row.genre || '' });
+      continue;
+    }
+    accepted.push({
+      row: rowNumber,
+      id,
+      batchId,
+      patch: {
+        genre,
+        subgenres: typeof row.subgenres === 'string' ? row.subgenres.split('|').map((item) => item.trim()).filter(Boolean) : [],
+        mood: row.mood || '',
+        energy: row.energy || '',
+        language: row.language || '',
+        genreSource: row.genreSource || 'csv-import',
+        genreConfidence: Number(row.genreConfidence) || 0,
+        genreUpdatedAt: row.genreUpdatedAt || new Date().toISOString(),
+        genreStatus: Number(row.genreConfidence) >= LOW_CONFIDENCE_THRESHOLD ? 'classified' : 'needs_review'
+      }
+    });
+  }
+
+  return {
+    ok: Boolean(batch && batchId),
+    batchId,
+    batchKnown: Boolean(batch),
+    accepted,
+    rejected,
+    totalRows: rows.length,
+    errors: batchId && batch ? [] : [{ message: 'The CSV must contain one known batchId column value.' }]
+  };
+};
+
+const applyBatchImport = async (preview) => {
+  const batch = await getExportBatch(preview.batchId);
+  if (!batch) return { ok: false, message: 'Export batch not found.' };
+  const changed = [];
+  for (const item of preview.accepted || []) {
+    const current = await getTrackById(item.id);
+    if (!current) continue;
+    const changedTrack = await updateTrackIf(
+      item.id,
+      { genreStatus: current.genreStatus === 'exported' ? 'exported' : current.genreStatus, exportBatchId: preview.batchId },
+      item.patch
+    );
+    if (changedTrack) changed.push(item.id);
+  }
+  const updatedBatch = await updateBatchStatus(preview.batchId);
+  return { ok: true, batchId: preview.batchId, changed, rejected: preview.rejected, batch: updatedBatch };
+};
+
+app.post('/api/admin/catalog/exports', requireAdmin, async (req, res) => {
+  try {
+    await migrateGenreStatuses();
+    const batchId = makeExportBatchId();
+    const exportedAt = new Date().toISOString();
+    const before = new Map((await listTracks()).map((track) => [track.id, track]));
+    const tracks = await claimPendingTracks(batchId, req.body?.batchSize, exportedAt);
+    if (!tracks.length) return res.status(204).json({ message: 'No new songs to export' });
+
+    const batch = {
+      batchId,
+      createdAt: exportedAt,
+      adminUid: req.user.uid,
+      trackIds: tracks.map((track) => track.id),
+      count: tracks.length,
+      importedCount: 0,
+      status: 'open',
+      rows: tracks,
+      previous: tracks.map((track) => ({ id: track.id, state: before.get(track.id) }))
+    };
+    await saveExportBatch(batch);
+    const csv = exportCatalogCsv(tracks, { batchId });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="sonara-${batchId}.csv"`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('[catalog export batch] failed', error);
+    return res.status(500).json({ message: 'Unable to export the next catalog batch.' });
+  }
+});
+
+app.get('/api/admin/catalog/exports/:batchId.csv', requireAdmin, async (req, res) => {
+  const batch = await getExportBatch(req.params.batchId);
+  if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
+  const csv = exportCatalogCsv(batch.rows || [], { batchId: batch.batchId });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="sonara-${batch.batchId}.csv"`);
+  return res.send(csv);
+});
+
+app.get('/api/admin/catalog/pending-count', requireAdmin, async (_req, res) => {
+  await migrateGenreStatuses();
+  const counts = { pending: 0, exported: 0, classified: 0, needsReview: 0 };
+  for (const track of await listTracks()) {
+    if (track.genreStatus === 'pending') counts.pending += 1;
+    if (track.genreStatus === 'exported') counts.exported += 1;
+    if (track.genreStatus === 'classified') counts.classified += 1;
+    if (track.genreStatus === 'needs_review') counts.needsReview += 1;
+  }
+  return res.json(counts);
+});
+
+app.get('/api/admin/catalog/exports', requireAdmin, async (_req, res) => {
+  const batches = await listExportBatches();
+  const result = [];
+  for (const batch of batches) {
+    const current = await updateBatchStatus(batch.batchId);
+    const ageDays = Math.floor((Date.now() - new Date(batch.createdAt).getTime()) / 86400000);
+    result.push({ ...current, ageDays, stale: ageDays > 7 });
+  }
+  return res.json({ batches: result });
+});
+
+const releaseBatchTracks = async (batchId) => {
+  const batch = await getExportBatch(batchId);
+  if (!batch) return null;
+  let released = 0;
+  for (const id of batch.trackIds) {
+    if (await updateTrackIf(id, { genreStatus: 'exported', exportBatchId: batchId }, { genreStatus: 'pending', exportBatchId: null, exportedAt: null })) released += 1;
+  }
+  await updateExportBatch(batchId, { status: 'released', releasedCount: released });
+  return { batchId, released };
+};
+
+app.post('/api/admin/catalog/exports/:batchId/release', requireAdmin, async (req, res) => {
+  const result = await releaseBatchTracks(req.params.batchId);
+  if (!result) return res.status(404).json({ message: 'Export batch not found.' });
+  return res.json(result);
+});
+
+app.post('/api/admin/catalog/exports/:batchId/requeue-outstanding', requireAdmin, async (req, res) => {
+  const result = await releaseBatchTracks(req.params.batchId);
+  if (!result) return res.status(404).json({ message: 'Export batch not found.' });
+  return res.json(result);
+});
+
+app.post('/api/admin/catalog/exports/:batchId/rollback', requireAdmin, async (req, res) => {
+  const batch = await getExportBatch(req.params.batchId);
+  if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
+  let restored = 0;
+  for (const item of batch.previous || []) {
+    if (!item.state) continue;
+    const current = await getTrackById(item.id);
+    if (!current) continue;
+    const { _id, ...state } = item.state;
+    await updateTrackIf(item.id, {}, state);
+    restored += 1;
+  }
+  await updateExportBatch(batch.batchId, { status: 'released', rolledBack: true });
+  return res.json({ ok: true, batchId: batch.batchId, restored });
+});
+
+app.post('/api/admin/catalog/import/batch/preview', requireAdmin, async (req, res) => {
+  try {
+    const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
+    if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
+    return res.json(await parseBatchImport(csvText, { overwrite: Boolean(req.body?.overwrite) }));
+  } catch (error) {
+    console.error('[catalog batch import preview] failed', error);
+    return res.status(500).json({ message: 'Unable to preview this catalog batch.' });
+  }
+});
+
+app.post('/api/admin/catalog/import/batch/apply', requireAdmin, async (req, res) => {
+  try {
+    const preview = req.body?.preview || await parseBatchImport(String(req.body?.csv ?? req.body?.content ?? ''), { overwrite: Boolean(req.body?.overwrite) });
+    if (!preview.ok) return res.status(400).json(preview);
+    return res.json(await applyBatchImport(preview));
+  } catch (error) {
+    console.error('[catalog batch import apply] failed', error);
+    return res.status(500).json({ message: 'Unable to apply this catalog batch.' });
+  }
+});
+
+const parseCsvRows = (rawValue) => {
+  const text = String(rawValue ?? '');
+  if (!text.trim()) return [];
+
+  const rows = [];
+  let current = '';
+  let record = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      record.push(current);
+      current = '';
+      continue;
+    }
+
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') index += 1;
+      if (current.length || record.length) {
+        record.push(current);
+        rows.push(record);
+        record = [];
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length || record.length) {
+    record.push(current);
+    rows.push(record);
+  }
+
+  if (!rows.length) return [];
+
+  const [headerRow, ...dataRows] = rows;
+  const headers = headerRow.map((item) => String(item).trim().replace(/^\uFEFF/, '').trim());
+  return dataRows
+    .filter((values) => values.some((value) => String(value).trim().length > 0))
+    .map((values) => {
+      const row = {};
+      headers.forEach((header, idx) => {
+        row[header] = values[idx] ?? '';
+      });
+      return row;
+    });
+};
+
+const buildCatalogImportPreview = async (rawCsv, { allowCreate = false } = {}) => {
+  const rows = parseCsvRows(rawCsv);
+  const existing = new Map((await listTracks()).map((track) => [String(track.id), track]));
+  const preview = [];
+  const errors = [];
+
+  rows.forEach((row, index) => {
+    const id = String(row.id ?? '').trim();
+    const title = String(row.title ?? '').trim();
+    if (!id) {
+      errors.push({ row: index + 2, field: 'id', message: 'Missing id value.' });
+      return;
+    }
+
+    const normalizedGenre = row.genre ? normalizeGenre(row.genre) : null;
+    if (row.genre && !normalizedGenre) {
+      errors.push({ row: index + 2, field: 'genre', message: `Genre "${row.genre}" is not in the approved vocabulary.` });
+    }
+
+    const existingTrack = existing.get(id) || null;
+    if (!existingTrack && !allowCreate) {
+      errors.push({ row: index + 2, field: 'id', message: `Track ${id} was not found in the catalog.` });
+    }
+
+    preview.push({
+      id,
+      title: title || existingTrack?.title || '',
+      existing: existingTrack,
+      patch: {
+        id,
+        title: title || existingTrack?.title || '',
+        artist: row.artist ?? existingTrack?.artist ?? '',
+        album: row.album ?? existingTrack?.album ?? '',
+        genre: normalizedGenre || row.genre || existingTrack?.genre || '',
+        subgenres: typeof row.subgenres === 'string' ? row.subgenres.split('|').map((item) => item.trim()).filter(Boolean) : (existingTrack?.subgenres || []),
+        mood: row.mood ?? existingTrack?.mood ?? '',
+        energy: row.energy ?? existingTrack?.energy ?? '',
+        language: row.language ?? existingTrack?.language ?? '',
+        genreSource: row.genreSource ?? existingTrack?.genreSource ?? 'csv-import',
+        genreConfidence: Number(row.genreConfidence ?? existingTrack?.genreConfidence ?? 0) || 0,
+        genreUpdatedAt: row.genreUpdatedAt || new Date().toISOString()
+      }
+    });
+  });
+
+  return {
+    ok: !errors.length,
+    totalRows: preview.length,
+    rows: preview,
+    errors
+  };
+};
+
+const applyCatalogImportPreview = async (previewPayload) => {
+  const payload = previewPayload && Array.isArray(previewPayload.rows) ? previewPayload : { rows: [] };
+  const before = await listTracks();
+  const updates = payload.rows.filter((entry) => entry?.id).map((entry) => ({
+    id: String(entry.id),
+    ...entry.patch,
+    genre: entry.patch.genre || null,
+    genreUpdatedAt: entry.patch.genreUpdatedAt || new Date().toISOString()
+  }));
+
+  if (updates.length) {
+    const { bulkUpdateTrackGenres } = await import('./catalogStore.js');
+    await bulkUpdateTrackGenres(updates);
+    invalidateCatalogCache();
+  }
+
+  const after = await listTracks();
+  const importRecord = {
+    id: randomUUID(),
+    appliedAt: new Date().toISOString(),
+    before,
+    after,
+    updates
+  };
+  catalogImportHistory.unshift(importRecord);
+  return importRecord;
+};
+
+const rollbackCatalogImport = async (importId) => {
+  const historyItem = catalogImportHistory.find((entry) => entry.id === importId) || catalogImportHistory[0];
+  if (!historyItem) return { ok: false, reason: 'No catalog import to roll back.' };
+
+  const rollbackRows = historyItem.before.map((track) => ({ id: track.id, ...track }));
+  const { bulkUpdateTrackGenres } = await import('./catalogStore.js');
+  await bulkUpdateTrackGenres(rollbackRows);
+  invalidateCatalogCache();
+
+  return { ok: true, id: historyItem.id, rolledBack: rollbackRows.length };
+};
+
+app.get('/api/admin/catalog.csv', requireAdmin, async (req, res) => {
+  return res.status(410).json({ message: 'This endpoint no longer creates import batches. Use POST /api/admin/catalog/exports.' });
+});
+
+app.get('/api/admin/catalog/backup.csv', requireAdmin, async (_req, res) => {
+  try {
+    const tracks = await listTracks();
+    const csv = exportCatalogCsv(tracks);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="sonara-catalog-backup.csv"');
+    return res.send(csv);
+  } catch (error) {
+    console.error('[catalog backup] failed', error);
+    return res.status(500).json({ message: 'Unable to create the catalog backup right now.' });
+  }
+});
+
+app.get('/api/admin/catalog/export.csv', requireAdmin, async (_req, res) => {
+  return res.status(410).json({ message: 'This endpoint no longer creates import batches. Use POST /api/admin/catalog/exports.' });
+});
+
+app.post('/api/admin/catalog/import/preview', requireAdmin, async (req, res) => {
+  try {
+    const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
+    if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
+
+    const preview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
+    return res.json(preview);
+  } catch (error) {
+    console.error('[catalog import preview] failed', error);
+    return res.status(500).json({ message: 'Unable to preview the catalog import right now.' });
+  }
+});
+
+app.post('/api/admin/catalog/import/apply', requireAdmin, async (req, res) => {
+  try {
+    const preview = req.body?.preview || req.body;
+    if (!preview || !Array.isArray(preview.rows)) {
+      const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
+      if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
+      const generatedPreview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
+      if (!generatedPreview.ok) return res.status(400).json(generatedPreview);
+      return res.json(await applyCatalogImportPreview(generatedPreview));
+    }
+
+    if (!preview.ok) return res.status(400).json(preview);
+    return res.json(await applyCatalogImportPreview(preview));
+  } catch (error) {
+    console.error('[catalog import apply] failed', error);
+    return res.status(500).json({ message: 'Unable to apply the catalog import right now.' });
+  }
+});
+
+app.post('/api/admin/catalog/preview', requireAdmin, async (req, res) => {
+  const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
+  if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
+  const preview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
+  return res.json(preview);
+});
+
+app.post('/api/admin/catalog/apply', requireAdmin, async (req, res) => {
+  const preview = req.body?.preview || req.body;
+  if (!preview || !Array.isArray(preview.rows)) {
+    const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
+    if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
+    const generatedPreview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
+    if (!generatedPreview.ok) return res.status(400).json(generatedPreview);
+    return res.json(await applyCatalogImportPreview(generatedPreview));
+  }
+  if (!preview.ok) return res.status(400).json(preview);
+  return res.json(await applyCatalogImportPreview(preview));
+});
+
+app.post('/api/admin/catalog/rollback', requireAdmin, async (req, res) => {
+  try {
+    const rollback = await rollbackCatalogImport(String(req.body?.importId || ''));
+    if (!rollback.ok) return res.status(400).json(rollback);
+    return res.json(rollback);
+  } catch (error) {
+    console.error('[catalog import rollback] failed', error);
+    return res.status(500).json({ message: 'Unable to rollback the catalog import right now.' });
+  }
+});
+
+app.get('/api/admin/catalog/imports', requireAdmin, async (_req, res) => {
+  return res.json({ imports: catalogImportHistory.slice(0, 20) });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -532,6 +1053,7 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
 
       const duration = Number(parsed?.format?.duration) || 0;
       const metadata = mergeTrackMetadata(parsed?.common, fileName, folder);
+      const embeddedGenre = normalizeGenre(parsed?.common?.genre?.[0] || parsed?.common?.genre);
 
       const objectKey = buildObjectKey(relativePath);
       await putObject(objectKey, file.buffer, mimeType);
@@ -574,6 +1096,7 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
         uploadedByEmail: uploaderEmail,
         uploadedByName: uploaderName,
         fileSizeBytes: file.buffer?.length || 0,
+        ...(embeddedGenre ? { genre: embeddedGenre, genreSource: 'tag', genreStatus: 'classified', genreConfidence: 1 } : {}),
         createdAt: new Date().toISOString()
       };
 
@@ -1167,6 +1690,7 @@ cron.schedule('0 * * * *', () => {
 app.listen(port, '0.0.0.0', () => {
   console.log(`Sonara backend running on http://0.0.0.0:${port}`);
   console.log(`Catalog store: ${storageMode()} | Object storage: ${isStorageConfigured() ? 'configured' : 'NOT configured'} | Auth: ${isFirebaseConfigured() ? 'configured' : 'disabled'}`);
+  migrateGenreStatuses().catch((error) => console.error('[catalog] genre status migration failed:', error.message));
 });
 
 export default app;

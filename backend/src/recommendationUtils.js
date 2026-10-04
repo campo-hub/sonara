@@ -1,3 +1,5 @@
+import { buildGenreAwareDailyMix } from './genreMixUtils.js';
+
 const FLAVORS = ['mixed', 'artist-focus', 'album-trail', 'new-arrivals', 'wildcard'];
 const NAME_WORDS = [
   ['Velvet', 'Hours'], ['Slow', 'Sunrise Static'], ['Afterglow', 'Letters'], ['Soft', 'Circuit'],
@@ -27,21 +29,26 @@ export const getRecommendationSizing = (trackCount) => {
 };
 
 const orderMix = (tracks, flavor, limit, seed) => {
-  const remaining = [...tracks].sort((left, right) => hashString(`${seed}:${left.id}`) - hashString(`${seed}:${right.id}`));
+  const base = buildGenreAwareDailyMix({ catalog: tracks, userId: `${seed}:${flavor}`, dateKey: seed, limit });
+  const remaining = [...tracks].filter((track) => !base.some((picked) => picked.id === track.id));
+  const candidates = [...base, ...remaining];
   const result = [];
   const artistCounts = new Map();
-  while (remaining.length && result.length < limit) {
+
+  while (candidates.length && result.length < limit) {
     const previousArtist = result.at(-1)?.artist;
-    const candidates = remaining.filter((track) => {
-      const count = artistCounts.get(track.artist) || 0;
-      return track.artist !== previousArtist && (flavor !== 'mixed' || count < 4);
-    });
-    const choice = (candidates.length ? candidates : remaining)[0];
-    remaining.splice(remaining.indexOf(choice), 1);
+    const available = candidates.filter((track) => String(track.artist || 'Unknown artist') !== previousArtist);
+    const pool = available.length ? available : candidates;
+    const choice = pool[0];
+    candidates.splice(candidates.indexOf(choice), 1);
+    const artist = String(choice.artist || 'Unknown artist');
+    const count = artistCounts.get(artist) || 0;
+    if (flavor === 'mixed' && count >= 4 && available.length) continue;
     result.push(choice);
-    artistCounts.set(choice.artist, (artistCounts.get(choice.artist) || 0) + 1);
+    artistCounts.set(artist, count + 1);
   }
-  return result;
+
+  return result.slice(0, limit);
 };
 
 const chooseName = (index, flavor, tracks, usedNames, seed) => {
