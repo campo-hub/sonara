@@ -930,55 +930,19 @@ app.get('/api/admin/catalog/export.csv', requireAdmin, async (_req, res) => {
 });
 
 app.post('/api/admin/catalog/import/preview', requireAdmin, async (req, res) => {
-  try {
-    const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
-    if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
-
-    const preview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
-    return res.json(preview);
-  } catch (error) {
-    console.error('[catalog import preview] failed', error);
-    return res.status(500).json({ message: 'Unable to preview the catalog import right now.' });
-  }
+  return res.status(410).json({ message: 'Use POST /api/admin/catalog/import/batch/preview so the batch ID is validated.' });
 });
 
 app.post('/api/admin/catalog/import/apply', requireAdmin, async (req, res) => {
-  try {
-    const preview = req.body?.preview || req.body;
-    if (!preview || !Array.isArray(preview.rows)) {
-      const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
-      if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
-      const generatedPreview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
-      if (!generatedPreview.ok) return res.status(400).json(generatedPreview);
-      return res.json(await applyCatalogImportPreview(generatedPreview));
-    }
-
-    if (!preview.ok) return res.status(400).json(preview);
-    return res.json(await applyCatalogImportPreview(preview));
-  } catch (error) {
-    console.error('[catalog import apply] failed', error);
-    return res.status(500).json({ message: 'Unable to apply the catalog import right now.' });
-  }
+  return res.status(410).json({ message: 'Use POST /api/admin/catalog/import/batch/apply so the batch ID is validated.' });
 });
 
 app.post('/api/admin/catalog/preview', requireAdmin, async (req, res) => {
-  const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
-  if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
-  const preview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
-  return res.json(preview);
+  return res.status(410).json({ message: 'Use POST /api/admin/catalog/import/batch/preview so the batch ID is validated.' });
 });
 
 app.post('/api/admin/catalog/apply', requireAdmin, async (req, res) => {
-  const preview = req.body?.preview || req.body;
-  if (!preview || !Array.isArray(preview.rows)) {
-    const csvText = String(req.body?.csv ?? req.body?.content ?? '').trim();
-    if (!csvText) return res.status(400).json({ message: 'CSV content is required.' });
-    const generatedPreview = await buildCatalogImportPreview(csvText, { allowCreate: Boolean(req.body?.allowCreate) });
-    if (!generatedPreview.ok) return res.status(400).json(generatedPreview);
-    return res.json(await applyCatalogImportPreview(generatedPreview));
-  }
-  if (!preview.ok) return res.status(400).json(preview);
-  return res.json(await applyCatalogImportPreview(preview));
+  return res.status(410).json({ message: 'Use POST /api/admin/catalog/import/batch/apply so the batch ID is validated.' });
 });
 
 app.post('/api/admin/catalog/rollback', requireAdmin, async (req, res) => {

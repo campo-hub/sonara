@@ -1269,6 +1269,7 @@ export default function App() {
   const [adminBatches, setAdminBatches] = useState([]);
   const [adminExportSize, setAdminExportSize] = useState(200);
   const [adminCsvText, setAdminCsvText] = useState('');
+  const [adminCsvName, setAdminCsvName] = useState('');
   const [adminPreview, setAdminPreview] = useState(null);
   const [adminActionLoading, setAdminActionLoading] = useState(false);
 
@@ -1424,6 +1425,17 @@ export default function App() {
       setAdminActionLoading(false);
     }
   }, [adminCsvText]);
+
+  const loadAdminCsvFile = useCallback(async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setNotice('Choose a .csv file exported from Sonara.');
+      return;
+    }
+    setAdminCsvName(file.name);
+    setAdminCsvText(await file.text());
+    setAdminPreview(null);
+  }, []);
 
   const applyAdminImport = useCallback(async () => {
     if (!adminPreview?.ok) return;
@@ -3306,9 +3318,15 @@ export default function App() {
 
           <div className="admin-import-grid">
             <div className="admin-import-box">
-              <div className="admin-panel-head compact"><div><h3>Import classified batch</h3><p className="muted-text">Only a CSV carrying a known batch ID can be applied.</p></div><label className="btn btn-sm">Choose CSV<input type="file" accept=".csv,text/csv" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) setAdminCsvText(await file.text()); event.target.value = ''; }} /></label></div>
-              <textarea value={adminCsvText} onChange={(event) => setAdminCsvText(event.target.value)} placeholder="Paste the completed batch CSV here" aria-label="Batch CSV" />
-              <div className="admin-import-actions"><button type="button" className="btn" onClick={previewAdminImport} disabled={!adminCsvText.trim() || adminActionLoading}>Preview import</button>{adminPreview?.ok && <button type="button" className="btn btn-primary" onClick={applyAdminImport} disabled={adminActionLoading}>Apply {adminPreview.accepted.length} rows</button>}</div>
+              <div className="admin-panel-head compact"><div><h3>Import classified batch</h3><p className="muted-text">Choose the completed CSV. Sonara checks its batch ID before applying anything.</p></div></div>
+              <label className="admin-file-drop" onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('is-dragging'); }} onDragLeave={(event) => event.currentTarget.classList.remove('is-dragging')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('is-dragging'); loadAdminCsvFile(event.dataTransfer.files?.[0]); }}>
+                <Icon name="upload" size={24} />
+                <strong>{adminCsvName || 'Drop the completed CSV here'}</strong>
+                <span>{adminCsvName ? 'File ready for validation' : 'or click to choose a batch file'}</span>
+                <span className="admin-file-choose">Choose CSV</span>
+                <input type="file" accept=".csv,text/csv" hidden onChange={(event) => { loadAdminCsvFile(event.target.files?.[0]); event.target.value = ''; }} />
+              </label>
+              <div className="admin-import-actions"><button type="button" className="btn btn-primary" onClick={previewAdminImport} disabled={!adminCsvText.trim() || adminActionLoading}>Preview CSV</button>{adminPreview?.ok && <button type="button" className="btn" onClick={applyAdminImport} disabled={adminActionLoading}>Apply {adminPreview.accepted.length} rows</button>}{adminCsvName && <button type="button" className="text-btn" onClick={() => { setAdminCsvName(''); setAdminCsvText(''); setAdminPreview(null); }}>Remove file</button>}</div>
               {adminPreview && <div className={`admin-preview ${adminPreview.ok ? 'is-ok' : 'is-error'}`}><strong>{adminPreview.ok ? `Batch ${adminPreview.batchId} recognized` : 'Import blocked'}</strong><span>{adminPreview.accepted.length} accepted · {adminPreview.rejected.invalidGenre.length} invalid genre · {adminPreview.rejected.wrongBatch.length} wrong batch · {adminPreview.rejected.unknownId.length} unknown track</span></div>}
             </div>
           </div>
