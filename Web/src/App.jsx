@@ -6,6 +6,7 @@ import { queryCache } from './lib/queryCache.js';
 import { createRouteHash, parseHashRoute } from './lib/routes.js';
 import { useActionMap } from './lib/useAction.js';
 import { ProgressSteps } from './lib/ProgressSteps.jsx';
+import { useMixGridFit, useVisibleCount } from './lib/useFit.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -2686,6 +2687,18 @@ export default function App() {
     onToggleLike: toggleLike,
     showWaveform: prefs.waveforms
   };
+  const collectionItems = useMemo(() => [
+    { id: 'favorites', name: 'Favorites', kind: 'playlists', tracks: favoriteTracks, open: () => goTo('favorites') },
+    ...playlists.map((playlist) => ({ id: playlist.id, name: playlist.name, kind: playlist.dynamic ? 'uploads' : 'playlists', tracks: playlist.tracks, open: () => openPlaylist(playlist.id) })),
+    ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({ id: mix.savedId || mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
+  ], [favoriteTracks, playlists, recommendedMixes]);
+
+  const mixGridRef = useRef(null);
+  const collectionRef = useRef(null);
+  const recentRef = useRef(null);
+  const mixFit = useMixGridFit(mixGridRef, Math.max(0, Math.min(recommendedMixes.length, 12)));
+  const collectionVisibleCount = useVisibleCount(collectionRef, collectionItems || [], 8);
+  const recentVisibleCount = useVisibleCount(recentRef, recentHistoryTracks || [], 6);
 
   /* ------------------------------ views ------------------------------ */
 
@@ -3525,13 +3538,8 @@ export default function App() {
       ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({ id: mix.savedId || mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
     ];
     const filteredCollection = collectionItems.filter((item) => collectionFilter === 'all' || item.kind === collectionFilter);
-    const spotlightTrack = (isPlaying && current) || featuredTrack || recentHistoryTracks[0] || favoriteTracks[0] || allTracks.find((track) => track.audioUrl);
-    const playSpotlight = () => {
-      if (!spotlightTrack) return;
-      if (current?.id === spotlightTrack.id) return togglePlay();
-      const index = allTracks.findIndex((track) => track.id === spotlightTrack.id);
-      if (index >= 0) startPlayback(allTracks, index, 'All Music');
-    };
+    const visibleCollection = filteredCollection.slice(0, collectionVisibleCount || Math.min(filteredCollection.length, 8));
+    const visibleRecent = recentHistoryTracks.slice(0, recentVisibleCount || Math.min(recentHistoryTracks.length, 6));
     const saveMix = async (mix) => {
       if (!requireAuth('Sign in to save this mix.')) return;
       try {
@@ -3546,26 +3554,87 @@ export default function App() {
 
     return (
       <div className="home-grid">
-        <aside className="home-rail home-dj-rail">
-          <p className="greeting"><i className="live-dot" aria-hidden="true" />{greeting()}, {displayName}</p>
-          <section className="home-panel dj-panel">
-            <SectionHead title="Sonara DJ" note="A new thread through your catalog" />
-            {spotlightTrack ? <>
-              <SleeveStack track={spotlightTrack} playing={isPlaying} spin={prefs.spin} onClick={() => setStageOpen(true)} />
-              <div className="mini-deck-meta"><span>{isPlaying ? 'Now spinning' : 'Ready on the deck'}</span><strong>{spotlightTrack.title}</strong><small>{spotlightTrack.artist}</small></div>
-              <div className="mini-deck-actions"><button type="button" className="play-fab" onClick={playSpotlight} aria-label={isPlaying ? 'Pause' : 'Play'}><Icon name={isPlaying ? 'pause' : 'play'} size={19} /></button><DjButton active={djOn} onClick={toggleDj} /><button type="button" className={`icon-btn heart ${likedIds.has(spotlightTrack.id) ? 'is-on' : ''}`} onClick={() => toggleLike(spotlightTrack.id)} aria-label="Favorite deck track"><Icon name="heart" size={18} filled={likedIds.has(spotlightTrack.id)} /></button></div>
-              {(current || djOn) && <><TransportControls isPlaying={isPlaying} shuffle={shuffle} repeat={repeat} disabled={!current} onToggle={togglePlay} onNext={() => advance(false)} onPrevious={previous} onShuffle={toggleShuffle} onRepeat={cycleRepeat} /><SeekBar position={position} total={total} onSeek={seekTo} disabled={!current} /></>}
-            </> : <EmptyState icon="music" title="No music yet" text="Upload a track to put something on the deck." />}
+        <aside className="home-rail home-collection-rail">
+          <section className="home-section collection-section">
+            <SectionHead title="Your collection" note="Playlists, uploads, and saved mixes" action={<button type="button" className="text-btn" onClick={() => goTo('playlists')}>See all</button>} />
+            <div className="chips" role="group" aria-label="Collection filter">
+              {[['all', 'All'], ['mixes', 'Mixes'], ['playlists', 'Playlists'], ['uploads', 'Uploads']].map(([id, label]) => (
+                <button key={id} type="button" className={`chip ${collectionFilter === id ? 'is-active' : ''}`} aria-pressed={collectionFilter === id} onClick={() => setCollectionFilter(id)}>{label}</button>
+              ))}
+            </div>
+            <div ref={collectionRef} className="collection-grid" style={{ minHeight: 182 }}>
+              {visibleCollection.map((item) => (
+                <article key={item.id} className="collection-tile">
+                  <button type="button" onClick={item.open}>
+                    <CoverArt track={item.tracks[0] || { id: item.id }} size="sm" />
+                    <span>
+                      <strong>{item.name}</strong>
+                      <small>{item.kind} · {plural(item.tracks.length, 'track')}</small>
+                    </span>
+                  </button>
+                  <button type="button" className="tile-fab" disabled={!item.tracks.length} onClick={() => startPlayback(item.tracks, 0, item.name)} aria-label={`Play ${item.name}`}>
+                    <Icon name="play" size={16} />
+                  </button>
+                </article>
+              ))}
+            </div>
           </section>
-          {djOn && upNext.length > 0 && <section className="home-panel coming-up"><SectionHead title="Coming up" /><ol>{upNext.map(({ track, index }) => <li key={track.id}><button type="button" onClick={() => jumpTo(index)}><CoverArt track={track} size="sm" /><span><strong>{track.title}</strong><small>{track.artist}</small></span></button></li>)}</ol></section>}
         </aside>
 
-        <main className="home-main">
-          <section className="home-section mixes-section"><SectionHead title={authUser ? `Picked for ${displayName}` : 'Picked for today'} note="Recommended" />{dailyRecommendations.state === 'loading' && <div className="shelf-skeleton" aria-label="Loading recommendations" />}{dailyRecommendations.state === 'error' && <EmptyState icon="refresh" title="Recommendations are resting" text="Try again when the catalog is reachable." action={<button type="button" className="btn" onClick={() => setRecommendationRefresh((value) => value + 1)}>Retry</button>} />}{dailyRecommendations.state === 'ready' && <div className="mix-shelf" tabIndex="0">{recommendedMixes.map((mix, index) => <article key={mix.id} className="recommendation-card"><button type="button" className="recommendation-art" onClick={() => startPlayback(mix.tracks, 0, mix.name, true)} aria-label={`Play ${mix.name}`}><span className="mix-stamp">No. {String(index + 1).padStart(2, '0')}</span><CoverArt track={mix.tracks[0]} size="fill" /><span className="tile-play"><Icon name="play" size={18} /></span></button><span className="feature-kicker">Recommended</span><strong>{mix.name}</strong><small>{mix.tracks.length} songs · {totalRuntime(mix.tracks)}</small><button type="button" className={`icon-btn heart ${mix.saved ? 'is-on' : ''}`} onClick={() => saveMix(mix)} aria-label={mix.saved ? 'Saved mix' : `Save ${mix.name}`}><Icon name="heart" size={18} filled={mix.saved} /></button></article>)}</div>}{dailyRecommendations.state === 'ready' && recommendedMixes.length < 10 && <p className="mix-footnote">Add more music to unlock 10 mixes.</p>}</section>
-          <section className="home-section collection-section"><SectionHead title="Your collection" note="Playlists, uploads, and saved mixes" /><div className="chips" role="group" aria-label="Collection filter">{[['all', 'All'], ['mixes', 'Mixes'], ['playlists', 'Playlists'], ['uploads', 'Uploads']].map(([id, label]) => <button key={id} type="button" className={`chip ${collectionFilter === id ? 'is-active' : ''}`} aria-pressed={collectionFilter === id} onClick={() => setCollectionFilter(id)}>{label}</button>)}</div><div className="collection-grid">{filteredCollection.slice(0, 12).map((item) => <article key={item.id} className="collection-tile"><button type="button" onClick={item.open}><CoverArt track={item.tracks[0] || { id: item.id }} size="sm" /><span><strong>{item.name}</strong><small>{item.kind} · {plural(item.tracks.length, 'track')}</small></span></button><button type="button" className="tile-fab" disabled={!item.tracks.length} onClick={() => startPlayback(item.tracks, 0, item.name)} aria-label={`Play ${item.name}`}><Icon name="play" size={16} /></button></article>)}</div></section>
+        <main className="home-main" ref={mixGridRef}>
+          <section className="home-section mixes-section">
+            <SectionHead title={authUser ? `Picked for ${displayName}` : 'Picked for today'} note={recommendedMixes.length < 10 ? 'Add more music to unlock 10 mixes.' : 'Recommended'} />
+            {dailyRecommendations.state === 'loading' && <div className="shelf-skeleton" aria-label="Loading recommendations" />}
+            {dailyRecommendations.state === 'error' && (
+              <EmptyState icon="refresh" title="Recommendations are resting" text="Try again when the catalog is reachable." action={<button type="button" className="btn" onClick={() => setRecommendationRefresh((value) => value + 1)}>Retry</button>} />
+            )}
+            {dailyRecommendations.state === 'ready' && (
+              <div className="mix-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, mixFit.columns)}, minmax(0, 1fr))`, minHeight: 220 }}>
+                {recommendedMixes.slice(0, 12).map((mix, index) => (
+                  <article key={mix.id} className="recommendation-card" style={{ minHeight: `${Math.max(120, mixFit.cardSize || 150)}px` }}>
+                    <button type="button" className="recommendation-art" onClick={() => startPlayback(mix.tracks, 0, mix.name, true)} aria-label={`Play ${mix.name}`}>
+                      <span className="mix-stamp">No. {String(index + 1).padStart(2, '0')}</span>
+                      <CoverArt track={mix.tracks[0]} size="fill" />
+                      <span className="tile-play"><Icon name="play" size={18} /></span>
+                    </button>
+                    <span className="feature-kicker">Recommended</span>
+                    <strong>{mix.name}</strong>
+                    <small>{mix.tracks.length} songs · {totalRuntime(mix.tracks)}</small>
+                    <button type="button" className={`icon-btn heart ${mix.saved ? 'is-on' : ''}`} onClick={() => saveMix(mix)} aria-label={mix.saved ? 'Saved mix' : `Save ${mix.name}`}>
+                      <Icon name="heart" size={18} filled={mix.saved} />
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </main>
 
-        <aside className="home-rail home-history-rail"><section className="home-panel history-panel"><SectionHead title="Recently played" action={<button type="button" className="text-btn" onClick={() => setPlayHistory([])}>Clear</button>} />{recentHistoryTracks.length ? <ol className="history-list">{recentHistoryTracks.slice(0, 15).map((track, index) => <li key={track.id}><button type="button" onClick={() => playRecent(track)}><CoverArt track={track} size="sm" /><span><strong>{track.title}</strong><small>{track.artist}</small></span><time>{relativeTime(playHistory[index]?.at)}</time><i className={current?.id === track.id && isPlaying ? 'is-playing' : ''} /></button></li>)}</ol> : <><EmptyState icon="clock" title="Nothing played yet" text="Play something and it will show up here." /><div className="new-arrivals"><strong>New arrivals</strong>{recentlyAddedTracks.slice(0, 5).map((track) => <button key={track.id} type="button" onClick={() => playFromList(recentlyAddedTracks, recentlyAddedTracks.indexOf(track), 'New arrivals')}><CoverArt track={track} size="sm" /><span>{track.title}</span></button>)}</div></>}</section></aside>
+        <aside className="home-rail home-history-rail">
+          <section className="home-section history-panel">
+            <SectionHead title="Recently played" action={<button type="button" className="text-btn" onClick={() => setPlayHistory([])}>Clear</button>} />
+            {recentHistoryTracks.length ? (
+              <ol ref={recentRef} className="history-list">
+                {visibleRecent.map((track, index) => (
+                  <li key={track.id}>
+                    <button type="button" onClick={() => playRecent(track)}>
+                      <CoverArt track={track} size="sm" />
+                      <span>
+                        <strong>{track.title}</strong>
+                        <small>{track.artist}</small>
+                      </span>
+                      <time>{relativeTime(playHistory[index]?.at)}</time>
+                      <i className={current?.id === track.id && isPlaying ? 'is-playing' : ''} />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <EmptyState icon="clock" title="Nothing played yet" text="Play something and it will show up here." />
+            )}
+            <button type="button" className="text-btn home-see-all" onClick={() => goTo('library')}>See all</button>
+          </section>
+        </aside>
       </div>
     );
   };
@@ -3680,7 +3749,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`page ${view === 'home' ? 'is-home' : ''}`}>
+      <main className={`page ${view === 'home' ? 'is-home' : ''}`} data-view={view === 'home' ? 'home' : undefined}>
         {view === 'home' ? (
           renderNewHome()
         ) : (
