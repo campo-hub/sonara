@@ -2698,7 +2698,7 @@ export default function App() {
   const recentRef = useRef(null);
   const mixFit = useMixGridFit(mixGridRef, Math.max(0, Math.min(recommendedMixes.length, 12)));
   const collectionVisibleCount = useVisibleCount(collectionRef, collectionItems || [], 8);
-  const recentVisibleCount = useVisibleCount(recentRef, recentHistoryTracks || [], 6);
+  const recentVisibleCount = recentHistoryTracks.length || 0;
 
   /* ------------------------------ views ------------------------------ */
 
@@ -3539,7 +3539,7 @@ export default function App() {
     ];
     const filteredCollection = collectionItems.filter((item) => collectionFilter === 'all' || item.kind === collectionFilter);
     const visibleCollection = filteredCollection.slice(0, collectionVisibleCount || Math.min(filteredCollection.length, 8));
-    const visibleRecent = recentHistoryTracks.slice(0, recentVisibleCount || Math.min(recentHistoryTracks.length, 6));
+    const visibleRecent = recentHistoryTracks.slice(0, recentVisibleCount || recentHistoryTracks.length);
     const saveMix = async (mix) => {
       if (!requireAuth('Sign in to save this mix.')) return;
       try {

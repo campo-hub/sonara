@@ -68,17 +68,17 @@ test('play history requires ten seconds or the end of a short track', () => {
   assert.equal(qualifiesForPlayHistory({ listenedSeconds: 2, currentTime: 4, duration: 5 }), false);
 });
 
-test('play history moves replays to the top, deduplicates, and caps at fifty', () => {
-  const initial = Array.from({ length: 50 }, (_, index) => ({ trackId: `track-${index}`, at: index }));
+test('play history moves replays to the top, deduplicates, and caps at seven', () => {
+  const initial = Array.from({ length: 7 }, (_, index) => ({ trackId: `track-${index}`, at: index }));
   const replayed = updatePlayHistory({ history: initial, trackId: 'track-25', at: 100 });
   assert.equal(replayed[0].trackId, 'track-25');
   assert.equal(replayed.filter((entry) => entry.trackId === 'track-25').length, 1);
-  assert.equal(replayed.length, 50);
+  assert.equal(replayed.length, 7);
 
   const added = updatePlayHistory({ history: replayed, trackId: 'new-track', at: 101 });
-  assert.equal(added.length, 50);
+  assert.equal(added.length, 7);
   assert.equal(added[0].trackId, 'new-track');
-  assert.equal(added.some((entry) => entry.trackId === 'track-49'), false);
+  assert.equal(added.some((entry) => entry.trackId === 'track-6'), false);
 });
 
 test('daily mix generation is deterministic per day and user', () => {
