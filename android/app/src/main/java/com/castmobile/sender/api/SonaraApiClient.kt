@@ -32,6 +32,20 @@ data class RemoteSong(
     val artwork: String?
 )
 
+data class RemoteRecommendationMix(
+    val id: String,
+    val name: String,
+    val subtitle: String?,
+    val trackIds: List<String>
+)
+
+data class RemoteGenrePlaylist(
+    val id: String,
+    val genre: String,
+    val name: String,
+    val trackIds: List<String>
+)
+
 data class UserAuthResult(
     val success: Boolean,
     val token: String? = null,
@@ -47,6 +61,7 @@ data class UsernameResult(
 )
 
 class SonaraApiClient(context: Context? = null) {
+    private val cachePrefs = context?.applicationContext?.getSharedPreferences("sonara_api_cache", Context.MODE_PRIVATE)
     private val diskCache = context?.let { Cache(File(it.cacheDir, "sonara-http"), 20L * 1024L * 1024L) }
     private val client = OkHttpClient.Builder()
         .cache(diskCache)
@@ -292,6 +307,63 @@ class SonaraApiClient(context: Context? = null) {
             }
         }
         tracks
+    }
+
+    suspend fun fetchDailyRecommendations(apiBaseUrl: String): List<RemoteRecommendationMix> = withContext(Dispatchers.IO) {
+        val targetUrl = buildEndpointUrl(apiBaseUrl, "/recommendations/daily")
+        val request = Request.Builder()
+            .url(targetUrl)
+            .get()
+            .addHeader("Accept", "application/json")
+            .cacheControl(CacheControl.Builder().maxAge(5, TimeUnit.MINUTES).maxStale(1, TimeUnit.DAYS).build())
+            .build()
+        val responseBody = try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) throw Exception("Server answered ${response.code}")
+            response.body?.string().orEmpty().also { cachePrefs?.edit()?.putString("daily_recommendations", it)?.apply() }
+        } catch (error: Exception) {
+            cachePrefs?.getString("daily_recommendations", null) ?: throw error
+        }
+        val root = gson.fromJson(responseBody, JsonObject::class.java)
+        val mixes = root?.getAsJsonArray("mixes") ?: return@withContext emptyList()
+        (0 until mixes.size()).mapNotNull { index ->
+            val item = mixes[index].takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val trackIds = item.getAsJsonArray("trackIds")?.mapNotNull { value -> value.takeIf { it.isJsonPrimitive }?.asString } ?: emptyList()
+            RemoteRecommendationMix(
+                id = item.get("id")?.asString.orEmpty(),
+                name = item.get("name")?.asString ?: "Daily Mix",
+                subtitle = item.get("subtitle")?.takeIf { !it.isJsonNull }?.asString,
+                trackIds = trackIds
+            )
+        }
+    }
+
+    suspend fun fetchGenrePlaylists(apiBaseUrl: String): List<RemoteGenrePlaylist> = withContext(Dispatchers.IO) {
+        val targetUrl = buildEndpointUrl(apiBaseUrl, "/genres/playlists")
+        val request = Request.Builder()
+            .url(targetUrl)
+            .get()
+            .addHeader("Accept", "application/json")
+            .cacheControl(CacheControl.Builder().maxAge(5, TimeUnit.MINUTES).maxStale(1, TimeUnit.DAYS).build())
+            .build()
+        val responseBody = try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) throw Exception("Server answered ${response.code}")
+            response.body?.string().orEmpty().also { cachePrefs?.edit()?.putString("genre_playlists", it)?.apply() }
+        } catch (error: Exception) {
+            cachePrefs?.getString("genre_playlists", null) ?: throw error
+        }
+        val array = gson.fromJson(responseBody, com.google.gson.JsonArray::class.java) ?: return@withContext emptyList()
+        (0 until array.size()).mapNotNull { index ->
+            val item = array[index].takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val trackIds = item.getAsJsonArray("trackIds")?.mapNotNull { value -> value.takeIf { it.isJsonPrimitive }?.asString } ?: emptyList()
+            RemoteGenrePlaylist(
+                id = item.get("id")?.asString.orEmpty(),
+                genre = item.get("genre")?.asString.orEmpty(),
+                name = item.get("name")?.asString.orEmpty(),
+                trackIds = trackIds
+            ).takeIf { it.genre.isNotBlank() && trackIds.isNotEmpty() }
+        }
     }
 
     suspend fun fetchUserLibrary(apiBaseUrl: String, idToken: String): String? = withContext(Dispatchers.IO) {

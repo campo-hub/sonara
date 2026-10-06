@@ -18,10 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
-import androidx.compose.material3.windowsizeclass.WindowSizeClass
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,10 +40,8 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val themeViewModel: ThemeViewModel by viewModels()
 
-    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val windowSizeClass = calculateWindowSizeClass(this)
         setContent {
             val systemDark = isSystemInDarkTheme()
             val isDark = themeViewModel.isDark(systemDark)
@@ -64,7 +58,7 @@ class MainActivity : ComponentActivity() {
                     PermissionWrapper(viewModel, themeViewModel) {
                         Box(modifier = Modifier.fillMaxSize().background(bg)) {
                             // Main navigation
-                            MainNavigation(viewModel, themeViewModel, systemDark, windowSizeClass)
+                            MainNavigation(viewModel, themeViewModel, systemDark)
 
                             // Full player overlay
                             AnimatedVisibility(
@@ -164,13 +158,7 @@ fun PermissionScreen(themeViewModel: ThemeViewModel, onGrant: () -> Unit) {
 }
 
 @Composable
-fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, systemDark: Boolean, windowSizeClass: WindowSizeClass) {
-    val libraryGridColumns = when (windowSizeClass.widthSizeClass) {
-        WindowWidthSizeClass.Compact -> 2
-        WindowWidthSizeClass.Medium -> 3
-        WindowWidthSizeClass.Expanded -> 4
-        else -> 2
-    }
+fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, systemDark: Boolean) {
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showAddToPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf<Track?>(null) }
@@ -311,8 +299,9 @@ fun MainNavigation(viewModel: MainViewModel, themeViewModel: ThemeViewModel, sys
                         onUpload = { uploadPicker.launch(arrayOf("audio/*")) },
                         onSignOut = { viewModel.setUserAuth(null, null) }
                     ) { viewModel.currentFolder = it }
-                    1 -> LiquidLibrary(viewModel, themeViewModel, systemDark, { showCreatePlaylistDialog = true }, { showAddToPlaylistDialog = it }, libraryGridColumns) { viewModel.currentFolder = it }
-                    2 -> LiquidLab(viewModel, themeViewModel, systemDark)
+                    1 -> LiquidLibrary(viewModel, themeViewModel, systemDark, { showCreatePlaylistDialog = true }) { viewModel.currentFolder = it }
+                    2 -> LiquidAllMusic(viewModel, themeViewModel, systemDark, { showAddToPlaylistDialog = it }) { track, list -> viewModel.playTrack(track, list) }
+                    3 -> LiquidLab(viewModel, themeViewModel, systemDark)
                 }
             }
 

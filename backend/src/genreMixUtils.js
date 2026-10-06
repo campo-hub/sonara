@@ -95,3 +95,27 @@ export const buildGenreAwareDailyMix = ({ catalog = [], userId = 'guest', dateKe
 
   return selected.slice(0, safeLimit).map(({ _rank, genre, ...track }) => ({ ...track, genre }));
 };
+
+export const buildGenrePlaylists = (catalog = []) => {
+  const grouped = new Map();
+  for (const track of Array.isArray(catalog) ? catalog : []) {
+    if (!track?.id || !(track.audioUrl || track.audio_url || track.src)) continue;
+    const genre = normalizeGenre(track.genre);
+    if (!genre) continue;
+    const group = grouped.get(genre) || [];
+    group.push(track);
+    grouped.set(genre, group);
+  }
+
+  return [...grouped.entries()]
+    .map(([genre, tracks]) => ({
+      id: `genre-${genre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      genre,
+      name: genre,
+      description: `${tracks.length} tracks tagged ${genre}`,
+      trackCount: tracks.length,
+      trackIds: tracks.map((track) => String(track.id)),
+      covers: tracks.map((track) => track.cover).filter(Boolean).slice(0, 4)
+    }))
+    .sort((left, right) => left.genre.localeCompare(right.genre));
+};

@@ -1,5 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { resolveUploaderIdentity } from '../src/adminStatsUtils.js';
+
+test('uploader identities prefer saved usernames and resolve Firebase fallbacks', () => {
+  assert.deepEqual(resolveUploaderIdentity({ uploadedBy: 'uid-1' }, { username: 'mwangi_k', email: 'mwangi@gmail.com' }), {
+    userKey: 'uid-1', uid: 'uid-1', email: 'mwangi@gmail.com', displayName: 'mwangi_k'
+  });
+  assert.equal(resolveUploaderIdentity({ uploadedBy: 'uid-2' }, null, { displayName: 'Neema', email: 'neema@example.com' }).displayName, 'neema');
+  assert.equal(resolveUploaderIdentity({ uploadedBy: 'uid-3' }, null, { email: 'reader@example.com' }).displayName, 'reader');
+  assert.equal(resolveUploaderIdentity({ uploadedBy: 'uid-4' }).displayName, 'Unknown user');
+  assert.equal(resolveUploaderIdentity({ uploadedBy: 'anonymous' }).displayName, 'Community');
+});
 
 import { buildEmptyLibraryPayload, mergeLibraryData, normalizeLibraryData } from '../src/libraryUtils.js';
 import { isAdminUser } from '../src/adminStore.js';

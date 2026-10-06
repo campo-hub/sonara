@@ -1,0 +1,55 @@
+--- old/sonara/android/app/src/main/java/com/castmobile/sender/ui/MainViewModel.kt	2026-10-03 11:25:54.000000000 +0000
++++ new/sonara/android/app/src/main/java/com/castmobile/sender/ui/MainViewModel.kt	2026-10-05 11:17:19.560163134 +0000
+@@ -16,6 +16,7 @@
+ import androidx.lifecycle.AndroidViewModel
+ import androidx.lifecycle.viewModelScope
+ import com.sonara.app.api.SonaraApiClient
++import com.sonara.app.api.RemoteRecommendationMix
+ import com.sonara.app.dj.DJSessionPlanner
+ import com.sonara.app.dj.ListeningHistory
+ import com.sonara.app.dj.PreferenceEngine
+@@ -126,6 +127,7 @@
+             val list = allTracks
+             return when (sortType) {
+                 "Name" -> if (isSortAscending) list.sortedBy { it.title.lowercase() } else list.sortedByDescending { it.title.lowercase() }
++                "Artist" -> if (isSortAscending) list.sortedBy { it.artist.lowercase() } else list.sortedByDescending { it.artist.lowercase() }
+                 "Date" -> if (isSortAscending) list.sortedBy { it.dateAdded } else list.sortedByDescending { it.dateAdded }
+                 "Size" -> if (isSortAscending) list.sortedBy { it.size } else list.sortedByDescending { it.size }
+                 else -> list
+@@ -350,6 +352,13 @@
+         get() = _remoteTracks.value
+         private set(value) { _remoteTracks.value = value }
+ 
++    var dailyRecommendationName by mutableStateOf("Daily Mix")
++        private set
++    var dailyRecommendationTracks by mutableStateOf<List<Track>>(emptyList())
++        private set
++    var genrePlaylists by mutableStateOf<List<Folder>>(emptyList())
++        private set
++
+     fun toggleOnlineMode(online: Boolean) {
+         isOnlineMode = online
+         prefs.edit().putBoolean("is_online_mode", online).apply()
+@@ -489,6 +498,22 @@
+                 _remoteTracks.value = tracks
+                 allTracks = tracks
+ 
++                val tracksByRemoteId = tracks.mapNotNull { track -> track.remoteId?.let { it to track } }.toMap()
++                val mixes: List<RemoteRecommendationMix> = apiClient.fetchDailyRecommendations(apiBaseUrl)
++                mixes.firstOrNull()?.let { mix ->
++                    dailyRecommendationName = mix.name
++                    dailyRecommendationTracks = mix.trackIds.mapNotNull { tracksByRemoteId[it] }
++                }
++                genrePlaylists = apiClient.fetchGenrePlaylists(apiBaseUrl).mapNotNull { playlist ->
++                    val playlistTracks = playlist.trackIds.mapNotNull { tracksByRemoteId[it] }
++                    if (playlistTracks.isEmpty()) null else Folder(
++                        name = playlist.name,
++                        trackCount = playlistTracks.size,
++                        tracks = playlistTracks,
++                        coverArtUri = playlistTracks.firstNotNullOfOrNull { it.albumArtUri }
++                    )
++                }
++
+                 // Group remote tracks into folders
+                 val groupedMap = tracks.groupBy { it.folderName }
+                 val groupedFolders = mutableListOf<Folder>()

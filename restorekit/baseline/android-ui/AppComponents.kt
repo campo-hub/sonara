@@ -1029,7 +1029,8 @@ fun NavDock(
             val tabs = listOf(
                 DockTab(0, Icons.Outlined.Home, Icons.Filled.Home, "Home"),
                 DockTab(1, Icons.Outlined.LibraryMusic, Icons.Filled.LibraryMusic, "Library"),
-                DockTab(2, Icons.Outlined.Palette, Icons.Filled.Palette, "Lab")
+                DockTab(2, Icons.Outlined.MusicNote, Icons.Filled.MusicNote, "All Music"),
+                DockTab(3, Icons.Outlined.Palette, Icons.Filled.Palette, "Lab")
             )
 
             for (tab in tabs) {

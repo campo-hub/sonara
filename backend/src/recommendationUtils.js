@@ -1,4 +1,5 @@
 import { buildGenreAwareDailyMix } from './genreMixUtils.js';
+import { normalizeGenre } from './genres.js';
 
 const FLAVORS = ['mixed', 'artist-focus', 'album-trail', 'new-arrivals', 'wildcard'];
 const NAME_WORDS = [
@@ -53,13 +54,65 @@ const orderMix = (tracks, flavor, limit, seed) => {
 
 const chooseName = (index, flavor, tracks, usedNames, seed) => {
   const artist = tracks[0]?.artist;
+  const genres = [...new Set(tracks.map((track) => normalizeGenre(track.genre)).filter(Boolean))];
+  const genreName = genres.length === 1 ? `${genres[0]} Mix` : '';
+  if (genreName && !usedNames.has(genreName)) {
+    usedNames.add(genreName);
+    return genreName;
+  }
   const candidates = flavor === 'artist-focus' && artist
     ? [`Deep in ${artist}`, `Around ${artist}`, `${artist} at Dusk`]
     : NAME_WORDS.map(([first, second]) => `${first} ${second}`);
   const ranked = [...candidates].sort((left, right) => hashString(`${seed}:${left}`) - hashString(`${seed}:${right}`));
-  const name = ranked.find((candidate) => !usedNames.has(candidate)) || `Sonara Set ${String(index + 1).padStart(2, '0')}`;
+  const name = ranked.find((candidate) => !usedNames.has(candidate)) || `Daily Mix ${String(index + 1).padStart(2, '0')}`;
   usedNames.add(name);
   return name;
+};
+
+export const generateUniversalDailyMixSnapshot = ({ catalog = [], dateKey, limit = 8, minimumGenreTracks = 5 } = {}) => {
+  const tracks = playableTracks(catalog);
+  if (!tracks.length) return { dateKey, mixes: [] };
+
+  const genreGroups = new Map();
+  for (const track of tracks) {
+    const genre = normalizeGenre(track.genre);
+    if (!genre) continue;
+    const group = genreGroups.get(genre) || [];
+    group.push(track);
+    genreGroups.set(genre, group);
+  }
+
+  const genres = [...genreGroups.entries()]
+    .filter(([, group]) => group.length >= Math.max(1, minimumGenreTracks))
+    .sort((left, right) => hashString(`${dateKey}:genre:${left[0]}`) - hashString(`${dateKey}:genre:${right[0]}`))
+    .slice(0, Math.max(0, Math.min(6, (Number(limit) || 8) - 2)));
+
+  const buildMix = (id, name, flavor, items) => ({
+    id,
+    name,
+    flavor,
+    subtitle: [...new Set(items.map((track) => track.artist).filter(Boolean))].slice(0, 3).join(' · '),
+    trackIds: items.map((track) => track.id)
+  });
+
+  const mixes = genres.map(([genre, group]) => {
+    const selected = [...group]
+      .sort((left, right) => hashString(`${dateKey}:${genre}:${left.id}`) - hashString(`${dateKey}:${genre}:${right.id}`))
+      .slice(0, Math.min(30, group.length));
+    const slug = genre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return buildMix(`genre-${dateKey}-${slug}`, `${genre} Mix`, 'genre', selected);
+  });
+
+  const newest = [...tracks].sort((left, right) => Date.parse(right.createdAt || right.addedAt || 0) - Date.parse(left.createdAt || left.addedAt || 0));
+  const deep = [...tracks].sort((left, right) => (Number(left.playCount) || 0) - (Number(right.playCount) || 0) || hashString(`${dateKey}:deep:${left.id}`) - hashString(`${dateKey}:deep:${right.id}`));
+  mixes.push(buildMix(`new-arrivals-${dateKey}`, 'New Arrivals', 'new-arrivals', newest.slice(0, Math.min(30, newest.length))));
+  mixes.push(buildMix(`deep-cuts-${dateKey}`, 'Deep Cuts', 'deep-cuts', deep.slice(0, Math.min(30, deep.length))));
+
+  if (!genres.length) {
+    mixes.unshift(buildMix(`daily-${dateKey}`, 'Daily Mix', 'daily', [...tracks].sort((left, right) => hashString(`${dateKey}:${left.id}`) - hashString(`${dateKey}:${right.id}`)).slice(0, Math.min(30, tracks.length))));
+  }
+
+  return { dateKey, mixes };
 };
 
 export const generateDailyMixSnapshot = ({ catalog = [], dateKey, seen = [], recentNames = [] } = {}) => {

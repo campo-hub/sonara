@@ -11,6 +11,7 @@ Thumbs.db
 **/*.pem
 **/serviceaccount*.json
 **/*firebase*.json
+**/google-services*.json
 
 # Node / frontend
 Web/node_modules/

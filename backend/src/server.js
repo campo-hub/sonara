@@ -35,7 +35,7 @@ import {
   updateExportBatch
 } from './catalogStore.js';
 import { buildEmptyLibraryPayload, mergeLibraryData, normalizeLibraryData } from './libraryUtils.js';
-import { verifyIdToken, isFirebaseConfigured } from './firebaseAdmin.js';
+import { verifyIdToken, getFirebaseUserRecord, isFirebaseConfigured } from './firebaseAdmin.js';
 import { getAdminConfig, claimAdmin, isAdminUser } from './adminStore.js';
 import {
   addTrackToPlaylist,
@@ -48,17 +48,21 @@ import {
   renamePlaylistForUser
 } from './playlistStore.js';
 import { getUserProfile, saveUserProfile, validateUsername } from './userStore.js';
-import { generateDailyMixSnapshot, getPlayableTracks } from './recommendationUtils.js';
+import { resolveUploaderIdentity } from './adminStatsUtils.js';
+import { getAdminJob, listRecentAdminJobs, startAdminJob } from './adminJobs.js';
+import { generateDailyMixSnapshot, generateUniversalDailyMixSnapshot, getPlayableTracks } from './recommendationUtils.js';
 import { getAllowedGenres, normalizeGenre } from './genres.js';
-import { buildGenreAwareDailyMix, exportCatalogCsv } from './genreMixUtils.js';
+import { buildGenreAwareDailyMix, buildGenrePlaylists, exportCatalogCsv } from './genreMixUtils.js';
 
 const app = express();
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 
 const memoryDailyMixes = new Map();
+const memoryUniversalDailyMixes = new Map();
 const memoryMixHistory = new Map();
 const memorySavedMixes = new Map();
+const firebaseUserCache = new Map();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const getLocalDateKey = (timeZone, now = new Date()) => {
@@ -85,16 +89,32 @@ const getRecommendationRequest = (req) => {
   return { timeZone, deviceId, dateKey, ownerKey };
 };
 
+const getCachedFirebaseUser = async (uid) => {
+  const cached = firebaseUserCache.get(uid);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
+  try {
+    const user = await getFirebaseUserRecord(uid);
+    firebaseUserCache.set(uid, { user, expiresAt: Date.now() + 5 * 60 * 1000 });
+    return user;
+  } catch {
+    firebaseUserCache.set(uid, { user: null, expiresAt: Date.now() + 60 * 1000 });
+    return null;
+  }
+};
+
 const recommendationCollections = async () => {
   if (!isMongoConfigured()) return null;
   const db = await getDb();
   const dailyMixes = db.collection('dailyMixes');
+  const universalDailyMixes = db.collection('universalDailyMixes');
   const mixHistory = db.collection('mixHistory');
   const savedMixes = db.collection('savedMixes');
   const mixOwners = db.collection('mixOwners');
   await Promise.all([
     dailyMixes.createIndex({ ownerKey: 1, dateKey: 1 }, { unique: true }),
     dailyMixes.createIndex({ createdAt: 1 }, { expireAfterSeconds: 8 * 24 * 60 * 60 }),
+    universalDailyMixes.createIndex({ dateKey: 1 }, { unique: true }),
+    universalDailyMixes.createIndex({ createdAt: 1 }, { expireAfterSeconds: 8 * 24 * 60 * 60 }),
     mixHistory.createIndex({ ownerKey: 1 }, { unique: true }),
     mixHistory.createIndex({ updatedAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 }),
     savedMixes.createIndex({ ownerUid: 1, updatedAt: -1 }),
@@ -102,7 +122,7 @@ const recommendationCollections = async () => {
     mixOwners.createIndex({ ownerKey: 1 }, { unique: true }),
     mixOwners.createIndex({ lastSeenAt: 1 })
   ]);
-  return { dailyMixes, mixHistory, savedMixes, mixOwners };
+  return { dailyMixes, universalDailyMixes, mixHistory, savedMixes, mixOwners };
 };
 
 const getDailySnapshot = async (ownerKey, dateKey) => {
@@ -139,6 +159,55 @@ const createDailySnapshot = async ({ ownerKey, dateKey, catalog, deviceId, uid }
     { upsert: true }
   );
   return (await getDailySnapshot(ownerKey, dateKey)) || snapshot;
+};
+
+const getUniversalDateKey = (now = new Date()) => getLocalDateKey(process.env.DAILY_MIX_TIMEZONE || 'UTC', now);
+
+const getUniversalSnapshot = async (dateKey) => {
+  const collections = await recommendationCollections();
+  if (!collections) return memoryUniversalDailyMixes.get(dateKey) || null;
+  return collections.universalDailyMixes.findOne({ dateKey }, { projection: { _id: 0 } });
+};
+
+const universalGenerationPromises = new Map();
+
+export const precomputeUniversalDailyMix = async ({ now = new Date() } = {}) => {
+  const dateKey = getUniversalDateKey(now);
+  const existing = await getUniversalSnapshot(dateKey);
+  if (existing) return { dateKey, generated: false, snapshot: existing };
+  if (universalGenerationPromises.has(dateKey)) return universalGenerationPromises.get(dateKey);
+
+  const generation = (async () => {
+    const catalog = (await getCatalogSnapshot()).tracks;
+    const generated = generateUniversalDailyMixSnapshot({ catalog, dateKey });
+    const snapshot = { ...generated, createdAt: new Date() };
+    const collections = await recommendationCollections();
+    if (!collections) {
+      memoryUniversalDailyMixes.set(dateKey, snapshot);
+      return { dateKey, generated: true, snapshot };
+    }
+    await collections.universalDailyMixes.updateOne({ dateKey }, { $setOnInsert: snapshot }, { upsert: true });
+    return { dateKey, generated: true, snapshot: (await getUniversalSnapshot(dateKey)) || snapshot };
+  })();
+
+  universalGenerationPromises.set(dateKey, generation);
+  try {
+    return await generation;
+  } finally {
+    universalGenerationPromises.delete(dateKey);
+  }
+};
+
+const getUniversalSnapshotOrPrevious = async (dateKey) => {
+  const current = await getUniversalSnapshot(dateKey);
+  if (current) return current;
+
+  const previousDate = new Date(`${dateKey}T00:00:00.000Z`);
+  previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+  const previousKey = previousDate.toISOString().slice(0, 10);
+  const previous = await getUniversalSnapshot(previousKey);
+  void precomputeUniversalDailyMix().catch((error) => console.error('[recommendations] background generation failed', error));
+  return previous;
 };
 
 const enrichDailyMixes = async (snapshot, uid) => {
@@ -277,6 +346,22 @@ async function requireAdmin(req, res, next) {
   }
   return next();
 }
+
+const sendEtaggedJson = (req, res, payload, cacheControl = 'private, max-age=15, stale-while-revalidate=30') => {
+  const body = JSON.stringify(payload);
+  const etag = `"${Buffer.from(body).toString('base64url')}"`;
+  res.set({ ETag: etag, 'Cache-Control': cacheControl, 'Content-Type': 'application/json; charset=utf-8' });
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  return res.send(body);
+};
+
+const sendEtaggedText = (req, res, body, contentType, filename) => {
+  const etag = `"${Buffer.from(body).toString('base64url')}"`;
+  res.set({ ETag: etag, 'Cache-Control': 'private, max-age=60', 'Content-Type': contentType });
+  if (filename) res.set('Content-Disposition', `attachment; filename="${filename}"`);
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  return res.send(body);
+};
 
 app.use(optionalAuth);
 
@@ -478,8 +563,8 @@ async function maybeSyncBucket() {
 app.get('/api/catalog', async (req, res) => {
   try {
     const snapshot = await getCatalogSnapshot();
-    if (req.headers['if-none-match'] === snapshot.etag) return res.status(304).end();
     res.set({ ETag: snapshot.etag, 'Cache-Control': 'public, max-age=30, stale-while-revalidate=300' });
+    if (req.headers['if-none-match'] === snapshot.etag) return res.status(304).end();
     void maybeSyncBucket();
     return res.json({ songs: snapshot.tracks });
   } catch (error) {
@@ -490,7 +575,20 @@ app.get('/api/catalog', async (req, res) => {
 
 app.get('/api/admin/genres/vocabulary', requireAdmin, async (_req, res) => {
   const genres = getAllowedGenres();
-  return res.json({ genres, count: genres.length, normalizeGenre });
+  return sendEtaggedJson(_req, res, { genres, count: genres.length });
+});
+
+app.get('/api/admin/jobs/:jobId', requireAdmin, async (req, res) => {
+  const job = getAdminJob(req.params.jobId);
+  if (!job) return res.status(404).json({ message: 'Admin job not found.' });
+  return sendEtaggedJson(req, res, job, 'no-store');
+});
+
+app.get('/api/admin/activity', requireAdmin, async (req, res) => {
+  const actions = listRecentAdminJobs(50).map(({ jobId, status, step, done, total, message, error, createdAt, updatedAt }) => ({
+    jobId, status, step, done, total, message, error, createdAt, updatedAt
+  }));
+  return sendEtaggedJson(req, res, { actions });
 });
 
 app.get('/api/genres', async (_req, res) => {
@@ -506,6 +604,41 @@ app.get('/api/genres', async (_req, res) => {
   } catch (error) {
     console.error('[genres] summary failed', error);
     return res.status(500).json({ message: 'Unable to load genre summary.' });
+  }
+});
+
+let genrePlaylistCache = { catalogEtag: '', etag: '', payload: [] };
+
+app.get('/api/genres/playlists', async (req, res) => {
+  try {
+    const catalog = await getCatalogSnapshot();
+    if (genrePlaylistCache.catalogEtag !== catalog.etag) {
+      const payload = buildGenrePlaylists(catalog.tracks);
+      const body = JSON.stringify(payload);
+      genrePlaylistCache = {
+        catalogEtag: catalog.etag,
+        etag: `"${Buffer.from(body).toString('base64url')}"`,
+        payload
+      };
+    }
+
+    res.set({ ETag: genrePlaylistCache.etag, 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
+    if (req.headers['if-none-match'] === genrePlaylistCache.etag) return res.status(304).end();
+    return res.json(genrePlaylistCache.payload);
+  } catch (error) {
+    console.error('[genres] playlist generation failed', error);
+    return res.status(500).json({ message: 'Unable to load genre playlists.' });
+  }
+});
+
+app.get('/api/admin/catalog/genres/untagged', requireAdmin, async (req, res) => {
+  try {
+    const catalog = await getCatalogSnapshot();
+    const tracks = catalog.tracks.filter((track) => !normalizeGenre(track.genre));
+    return sendEtaggedJson(req, res, { trackCount: tracks.length, trackIds: tracks.map((track) => String(track.id)) });
+  } catch (error) {
+    console.error('[admin genres] untagged tracks failed', error);
+    return res.status(500).json({ message: 'Unable to load untagged tracks.' });
   }
 });
 
@@ -610,21 +743,27 @@ const parseBatchImport = async (rawCsv, { overwrite = false } = {}) => {
   };
 };
 
-const applyBatchImport = async (preview) => {
+const applyBatchImport = async (preview, { report = () => {}, step = () => {} } = {}) => {
   const batch = await getExportBatch(preview.batchId);
   if (!batch) return { ok: false, message: 'Export batch not found.' };
   const changed = [];
-  for (const item of preview.accepted || []) {
+  const accepted = preview.accepted || [];
+  step('Applying classified tracks', `Applying ${accepted.length} accepted rows.`);
+  for (let index = 0; index < accepted.length; index += 1) {
+    const item = accepted[index];
     const current = await getTrackById(item.id);
-    if (!current) continue;
-    const changedTrack = await updateTrackIf(
-      item.id,
-      { genreStatus: current.genreStatus === 'exported' ? 'exported' : current.genreStatus, exportBatchId: preview.batchId },
-      item.patch
-    );
-    if (changedTrack) changed.push(item.id);
+    if (current) {
+      const changedTrack = await updateTrackIf(
+        item.id,
+        { genreStatus: current.genreStatus === 'exported' ? 'exported' : current.genreStatus, exportBatchId: preview.batchId },
+        item.patch
+      );
+      if (changedTrack) changed.push(item.id);
+    }
+    report({ step: 'Applying classified tracks', done: index + 1, total: accepted.length, message: `Applying ${index + 1} of ${accepted.length}` });
   }
   const updatedBatch = await updateBatchStatus(preview.batchId);
+  if (changed.length) invalidateCatalogCache();
   return { ok: true, batchId: preview.batchId, changed, rejected: preview.rejected, batch: updatedBatch };
 };
 
@@ -663,71 +802,84 @@ app.get('/api/admin/catalog/exports/:batchId.csv', requireAdmin, async (req, res
   const batch = await getExportBatch(req.params.batchId);
   if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
   const csv = exportCatalogCsv(batch.rows || [], { batchId: batch.batchId });
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="sonara-${batch.batchId}.csv"`);
-  return res.send(csv);
+  return sendEtaggedText(req, res, csv, 'text/csv; charset=utf-8', `sonara-${batch.batchId}.csv`);
 });
 
-app.get('/api/admin/catalog/pending-count', requireAdmin, async (_req, res) => {
-  await migrateGenreStatuses();
-  const counts = { pending: 0, exported: 0, classified: 0, needsReview: 0 };
-  for (const track of await listTracks()) {
-    if (track.genreStatus === 'pending') counts.pending += 1;
-    if (track.genreStatus === 'exported') counts.exported += 1;
-    if (track.genreStatus === 'classified') counts.classified += 1;
-    if (track.genreStatus === 'needs_review') counts.needsReview += 1;
-  }
-  return res.json(counts);
+app.get('/api/admin/catalog/pending-count', requireAdmin, async (req, res) => {
+  const counts = await buildAdminPendingCounts();
+  return sendEtaggedJson(req, res, counts);
 });
 
-app.get('/api/admin/catalog/exports', requireAdmin, async (_req, res) => {
-  const batches = await listExportBatches();
-  const result = [];
-  for (const batch of batches) {
-    const current = await updateBatchStatus(batch.batchId);
-    const ageDays = Math.floor((Date.now() - new Date(batch.createdAt).getTime()) / 86400000);
-    result.push({ ...current, ageDays, stale: ageDays > 7 });
-  }
-  return res.json({ batches: result });
+app.get('/api/admin/catalog/exports', requireAdmin, async (req, res) => {
+  const batches = await buildAdminBatchList();
+  return sendEtaggedJson(req, res, { batches });
 });
 
-const releaseBatchTracks = async (batchId) => {
+const releaseBatchTracks = async (batchId, { report = () => {}, step = () => {} } = {}) => {
   const batch = await getExportBatch(batchId);
   if (!batch) return null;
   let released = 0;
-  for (const id of batch.trackIds) {
+  const trackIds = batch.trackIds || [];
+  step('Finding outstanding tracks', `${trackIds.length} tracks in batch ${batchId}.`);
+  for (let index = 0; index < trackIds.length; index += 1) {
+    const id = trackIds[index];
     if (await updateTrackIf(id, { genreStatus: 'exported', exportBatchId: batchId }, { genreStatus: 'pending', exportBatchId: null, exportedAt: null })) released += 1;
+    report({ step: 'Marking as queued', done: index + 1, total: trackIds.length, message: `Re-queuing ${index + 1} of ${trackIds.length}` });
   }
+  step('Saving batch state', `Saving ${released} queued tracks.`);
   await updateExportBatch(batchId, { status: 'released', releasedCount: released });
   return { batchId, released };
 };
 
 app.post('/api/admin/catalog/exports/:batchId/release', requireAdmin, async (req, res) => {
-  const result = await releaseBatchTracks(req.params.batchId);
-  if (!result) return res.status(404).json({ message: 'Export batch not found.' });
-  return res.json(result);
+  const batch = await getExportBatch(req.params.batchId);
+  if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
+  return res.status(202).json(startAdminJob({
+    label: `Release batch ${batch.batchId}`,
+    total: (batch.trackIds || []).length,
+    run: async ({ report, step }) => {
+      const result = await releaseBatchTracks(batch.batchId, { report, step });
+      return { ...result, message: `Released ${result?.released || 0} outstanding tracks in ${batch.batchId}.` };
+    }
+  }));
 });
 
 app.post('/api/admin/catalog/exports/:batchId/requeue-outstanding', requireAdmin, async (req, res) => {
-  const result = await releaseBatchTracks(req.params.batchId);
-  if (!result) return res.status(404).json({ message: 'Export batch not found.' });
-  return res.json(result);
+  const batch = await getExportBatch(req.params.batchId);
+  if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
+  return res.status(202).json(startAdminJob({
+    label: `Re-queue batch ${batch.batchId}`,
+    total: (batch.trackIds || []).length,
+    run: async ({ report, step }) => {
+      const result = await releaseBatchTracks(batch.batchId, { report, step });
+      return { ...result, message: `Re-queued ${result?.released || 0} outstanding tracks in ${batch.batchId}.` };
+    }
+  }));
 });
 
 app.post('/api/admin/catalog/exports/:batchId/rollback', requireAdmin, async (req, res) => {
   const batch = await getExportBatch(req.params.batchId);
   if (!batch) return res.status(404).json({ message: 'Export batch not found.' });
-  let restored = 0;
-  for (const item of batch.previous || []) {
-    if (!item.state) continue;
-    const current = await getTrackById(item.id);
-    if (!current) continue;
-    const { _id, ...state } = item.state;
-    await updateTrackIf(item.id, {}, state);
-    restored += 1;
-  }
-  await updateExportBatch(batch.batchId, { status: 'released', rolledBack: true });
-  return res.json({ ok: true, batchId: batch.batchId, restored });
+  return res.status(202).json(startAdminJob({
+    label: `Rollback batch ${batch.batchId}`,
+    total: (batch.previous || []).length,
+    run: async ({ report, step }) => {
+      let restored = 0;
+      const previous = batch.previous || [];
+      step('Restoring prior track states', `Restoring ${previous.length} tracks.`);
+      for (let index = 0; index < previous.length; index += 1) {
+        const item = previous[index];
+        if (item.state && await getTrackById(item.id)) {
+          const { _id, ...state } = item.state;
+          await updateTrackIf(item.id, {}, state);
+          restored += 1;
+        }
+        report({ step: 'Restoring prior track states', done: index + 1, total: previous.length, message: `Restored ${index + 1} of ${previous.length}` });
+      }
+      await updateExportBatch(batch.batchId, { status: 'released', rolledBack: true });
+      return { ok: true, batchId: batch.batchId, restored, message: `Restored ${restored} tracks from batch ${batch.batchId}.` };
+    }
+  }));
 });
 
 app.post('/api/admin/catalog/import/batch/preview', requireAdmin, async (req, res) => {
@@ -745,7 +897,15 @@ app.post('/api/admin/catalog/import/batch/apply', requireAdmin, async (req, res)
   try {
     const preview = req.body?.preview || await parseBatchImport(String(req.body?.csv ?? req.body?.content ?? ''), { overwrite: Boolean(req.body?.overwrite) });
     if (!preview.ok) return res.status(400).json(preview);
-    return res.json(await applyBatchImport(preview));
+    return res.status(202).json(startAdminJob({
+      label: `Apply import batch ${preview.batchId}`,
+      total: Array.isArray(preview.accepted) ? preview.accepted.length : 0,
+      run: async ({ report, step }) => {
+        const result = await applyBatchImport(preview, { report, step });
+        if (!result.ok) throw new Error(result.message || 'Unable to apply this batch.');
+        return { ...result, message: `Imported ${result.changed.length} tracks from batch ${result.batchId}.` };
+      }
+    }));
   } catch (error) {
     console.error('[catalog batch import apply] failed', error);
     return res.status(500).json({ message: 'Unable to apply this catalog batch.' });
@@ -912,13 +1072,11 @@ app.get('/api/admin/catalog.csv', requireAdmin, async (req, res) => {
   return res.status(410).json({ message: 'This endpoint no longer creates import batches. Use POST /api/admin/catalog/exports.' });
 });
 
-app.get('/api/admin/catalog/backup.csv', requireAdmin, async (_req, res) => {
+app.get('/api/admin/catalog/backup.csv', requireAdmin, async (req, res) => {
   try {
     const tracks = await listTracks();
     const csv = exportCatalogCsv(tracks);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="sonara-catalog-backup.csv"');
-    return res.send(csv);
+    return sendEtaggedText(req, res, csv, 'text/csv; charset=utf-8', 'sonara-catalog-backup.csv');
   } catch (error) {
     console.error('[catalog backup] failed', error);
     return res.status(500).json({ message: 'Unable to create the catalog backup right now.' });
@@ -947,17 +1105,28 @@ app.post('/api/admin/catalog/apply', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/catalog/rollback', requireAdmin, async (req, res) => {
   try {
-    const rollback = await rollbackCatalogImport(String(req.body?.importId || ''));
-    if (!rollback.ok) return res.status(400).json(rollback);
-    return res.json(rollback);
+    const importId = String(req.body?.importId || '');
+    const history = catalogImportHistory.find((entry) => entry.id === importId) || catalogImportHistory[0];
+    if (!history) return res.status(400).json({ ok: false, reason: 'No catalog import to roll back.' });
+    return res.status(202).json(startAdminJob({
+      label: `Rollback catalog import ${history.id}`,
+      total: history.before.length,
+      run: async ({ report, step }) => {
+        step('Restoring catalog genre values', `Restoring ${history.before.length} tracks.`);
+        const rollback = await rollbackCatalogImport(history.id);
+        if (!rollback.ok) throw new Error(rollback.reason || 'Unable to rollback this import.');
+        report({ step: 'Saving restored catalog', done: rollback.rolledBack, total: history.before.length, message: `Restored ${rollback.rolledBack} tracks.` });
+        return { ...rollback, message: `Restored ${rollback.rolledBack} tracks from import ${history.id}.` };
+      }
+    }));
   } catch (error) {
     console.error('[catalog import rollback] failed', error);
     return res.status(500).json({ message: 'Unable to rollback the catalog import right now.' });
   }
 });
 
-app.get('/api/admin/catalog/imports', requireAdmin, async (_req, res) => {
-  return res.json({ imports: catalogImportHistory.slice(0, 20) });
+app.get('/api/admin/catalog/imports', requireAdmin, async (req, res) => {
+  return sendEtaggedJson(req, res, { imports: catalogImportHistory.slice(0, 20) });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -1043,8 +1212,9 @@ app.post('/api/uploads/bulk', upload.array('files', 100), async (req, res) => {
       }
 
       const id = deriveTrackId(objectKey);
-      const uploaderEmail = req.user?.email || null;
-      const uploaderName = req.user?.name || req.user?.displayName || uploaderEmail?.split('@')[0] || 'Community Uploader';
+      const uploaderProfile = req.user?.uid ? await getUserProfile(req.user.uid).catch(() => null) : null;
+      const uploaderEmail = uploaderProfile?.email || req.user?.email || null;
+      const uploaderName = uploaderProfile?.username || req.user?.name || req.user?.displayName || uploaderEmail?.split('@')[0] || 'Community Uploader';
 
       const track = {
         id,
@@ -1254,32 +1424,17 @@ async function upsertUserLibraryDocument(uid, data) {
 
 app.get('/api/recommendations/daily', async (req, res) => {
   try {
-    const request = getRecommendationRequest(req);
-    if (request.error) return res.status(400).json({ message: request.error });
-    await touchMixOwner(request);
-    const catalog = await listTracks();
-    let snapshot = await getDailySnapshot(request.ownerKey, request.dateKey);
-    if (!snapshot && req.user && request.deviceId) {
-      snapshot = await getDailySnapshot(`d:${request.deviceId}`, request.dateKey);
-      if (snapshot) {
-        snapshot = { ...snapshot, ownerKey: request.ownerKey, ownerUid: req.user.uid };
-        const collections = await recommendationCollections();
-        if (collections) {
-          await collections.dailyMixes.updateOne({ ownerKey: request.ownerKey, dateKey: request.dateKey }, { $setOnInsert: snapshot }, { upsert: true });
-        } else {
-          memoryDailyMixes.set(`${request.ownerKey}:${request.dateKey}`, snapshot);
-        }
-      }
-    }
-    if (!snapshot) snapshot = await createDailySnapshot({ ...request, catalog, uid: req.user?.uid });
-    const mixes = await enrichDailyMixes(snapshot, req.user?.uid);
-    const nextDateKey = getLocalDateKey(request.timeZone, new Date(Date.now() + 24 * 60 * 60 * 1000));
-    const nextSnapshot = await getDailySnapshot(request.ownerKey, nextDateKey);
-    const next = nextSnapshot ? await enrichDailyMixes(nextSnapshot, req.user?.uid) : null;
-    const payload = JSON.stringify({ dateKey: request.dateKey, nextRefreshAt: `${request.dateKey}T23:59:59.999Z`, mixes, next: next ? { dateKey: nextDateKey, mixes: next } : null });
+    const dateKey = getUniversalDateKey();
+    const snapshot = await getUniversalSnapshotOrPrevious(dateKey);
+    const payload = JSON.stringify({
+      dateKey: snapshot?.dateKey || dateKey,
+      nextRefreshAt: `${dateKey}T23:59:59.999Z`,
+      stale: Boolean(snapshot && snapshot.dateKey !== dateKey),
+      mixes: snapshot?.mixes || []
+    });
     const etag = `"${Buffer.from(payload).toString('base64url')}"`;
+    res.set({ ETag: etag, 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    res.set('ETag', etag);
     return res.json(JSON.parse(payload));
   } catch (error) {
     console.error('[recommendations] daily read failed', error);
@@ -1292,44 +1447,47 @@ app.post('/api/internal/jobs/daily-mixes', async (req, res) => {
   const suppliedSecret = String(req.headers['x-cron-secret'] || '');
   if (!configuredSecret || suppliedSecret !== configuredSecret) return res.status(401).json({ message: 'Unauthorized.' });
   try {
-    return res.json({ ok: true, ...(await precomputeDailyMixes()) });
+    const result = await precomputeUniversalDailyMix();
+    return res.json({ ok: true, dateKey: result.dateKey, generated: result.generated });
   } catch (error) {
     console.error('[recommendations] precompute failed', error);
     return res.status(500).json({ message: 'Daily mix precompute failed.' });
   }
 });
 
+const buildLegacyUniversalMix = async ({ uid, deviceId, createdAt = new Date().toISOString() }) => {
+  let snapshot = await getUniversalSnapshotOrPrevious(getUniversalDateKey());
+  if (!snapshot) snapshot = (await precomputeUniversalDailyMix()).snapshot;
+  const mix = snapshot?.mixes?.[0] || { name: 'Daily Mix', trackIds: [], flavor: 'daily' };
+  const catalog = (await getCatalogSnapshot()).tracks;
+  const byId = new Map(getPlayableTracks(catalog).map((track) => [track.id, track]));
+  const tracks = (mix.trackIds || []).map((id) => byId.get(String(id))).filter(Boolean);
+  const dateKey = snapshot?.dateKey || getUniversalDateKey();
+  return {
+    id: `daily-${dateKey}`,
+    name: mix.name || 'Daily Mix',
+    dateKey,
+    deviceId: String(deviceId || 'web').trim() || 'web',
+    owner: uid,
+    trackIds: tracks.map((track) => String(track.id)),
+    tracks,
+    createdAt,
+    updatedAt: new Date().toISOString()
+  };
+};
+
 app.get('/api/me/daily-mix', requireAuth, async (req, res) => {
   try {
-    const dateKey = getMixDateKey();
     const library = await getUserLibraryDocument(req.user.uid);
     const currentMix = Array.isArray(library.data.dailyMixes)
-      ? library.data.dailyMixes.find((mix) => mix.dateKey === dateKey && mix.owner === req.user.uid)
+      ? library.data.dailyMixes.find((mix) => mix.dateKey === getUniversalDateKey() && mix.owner === req.user.uid)
       : null;
-
-    const catalog = await listTracks();
-    const generated = buildDailyMixForCatalog({ catalog, userId: req.user.uid, dateKey, limit: 5 });
-    const payload = {
-      id: `daily-${dateKey}`,
-      name: 'Daily mix',
-      dateKey,
-      deviceId: String(req.headers['x-device-id'] || 'web').trim() || 'web',
-      owner: req.user.uid,
-      trackIds: generated.map((track) => String(track.id)),
-      tracks: generated,
-      createdAt: currentMix?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    if (currentMix && currentMix.trackIds?.length) {
-      payload.trackIds = currentMix.trackIds;
-      payload.tracks = currentMix.tracks?.length ? currentMix.tracks : generated;
-    }
+    const payload = await buildLegacyUniversalMix({ uid: req.user.uid, deviceId: req.headers['x-device-id'], createdAt: currentMix?.createdAt });
 
     const nextDocument = {
       ...library.data,
       dailyMixes: [
-        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== dateKey || mix.owner !== req.user.uid) : []),
+        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== payload.dateKey || mix.owner !== req.user.uid) : []),
         payload
       ],
       mixHistory: Array.isArray(library.data.mixHistory) ? library.data.mixHistory.slice(-25) : []
@@ -1350,26 +1508,12 @@ app.get('/api/me/daily-mix', requireAuth, async (req, res) => {
 
 app.post('/api/me/daily-mix/refresh', requireAuth, async (req, res) => {
   try {
-    const dateKey = getMixDateKey();
-    const catalog = await listTracks();
-    const tracks = buildDailyMixForCatalog({ catalog, userId: req.user.uid, dateKey, limit: 5 });
-    const payload = {
-      id: `daily-${dateKey}`,
-      name: 'Daily mix',
-      dateKey,
-      deviceId: String(req.headers['x-device-id'] || req.body?.deviceId || 'web').trim() || 'web',
-      owner: req.user.uid,
-      trackIds: tracks.map((track) => String(track.id)),
-      tracks,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
     const library = await getUserLibraryDocument(req.user.uid);
+    const payload = await buildLegacyUniversalMix({ uid: req.user.uid, deviceId: req.headers['x-device-id'] || req.body?.deviceId });
     const nextDocument = {
       ...library.data,
       dailyMixes: [
-        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== dateKey || mix.owner !== req.user.uid) : []),
+        ...(Array.isArray(library.data.dailyMixes) ? library.data.dailyMixes.filter((mix) => mix.dateKey !== payload.dateKey || mix.owner !== req.user.uid) : []),
         payload
       ],
       mixHistory: [
@@ -1405,7 +1549,7 @@ app.post('/api/me/mixes', requireAuth, async (req, res) => {
     const dailyMixId = String(req.body?.dailyMixId || '').trim();
     const dateKey = String(req.body?.dateKey || '').trim();
     if (!dailyMixId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return res.status(400).json({ message: 'A daily mix id and date are required.' });
-    const snapshot = await getDailySnapshot(`u:${req.user.uid}`, dateKey);
+    const snapshot = await getUniversalSnapshot(dateKey);
     const source = snapshot?.mixes?.find((mix) => mix.id === dailyMixId);
     if (!source) return res.status(404).json({ message: 'Recommended mix not found.' });
     const existing = (await listSavedMixes(req.user.uid)).find((mix) => mix.origin?.mixId === dailyMixId && mix.origin?.dateKey === dateKey);
@@ -1550,90 +1694,179 @@ app.post('/api/admin/claim', requireAuth, async (req, res) => {
   }
 });
 
+const buildAdminStatsPayload = async () => {
+  const admin = await getAdminConfig();
+  if (!admin) return null;
+  const tracks = await listTracks();
+  const configuredRate = Number(process.env.R2_COST_PER_GB_USD);
+  const costPerGBUSD = Number.isFinite(configuredRate) && configuredRate >= 0 ? configuredRate : 0.015;
+  const configuredBudget = Number(process.env.R2_MONTHLY_BUDGET_USD);
+  const monthlyBudgetUSD = Number.isFinite(configuredBudget) && configuredBudget > 0 ? configuredBudget : null;
+  const identitiesByUid = new Map();
+  const uploaderUids = [...new Set(tracks.map((track) => String(track.uploadedBy || '')).filter((value) => value && !value.includes('@') && !['anonymous', 'community'].includes(value.toLowerCase())))];
+
+  await Promise.all(uploaderUids.map(async (uid) => {
+    const profile = await getUserProfile(uid).catch(() => null);
+    const firebaseUser = (!profile?.username || !profile?.email) && isFirebaseConfigured() ? await getCachedFirebaseUser(uid) : null;
+    const sourceTrack = tracks.find((track) => String(track.uploadedBy || '') === uid) || { uploadedBy: uid };
+    const identity = resolveUploaderIdentity(sourceTrack, profile, firebaseUser);
+    identitiesByUid.set(uid, identity);
+    if (firebaseUser && identity.email) {
+      const candidate = identity.displayName === 'Unknown user' ? identity.email.split('@')[0] : identity.displayName;
+      if (candidate && !validateUsername(candidate)) {
+        await saveUserProfile({ uid, email: identity.email, username: candidate }).catch(() => {});
+      }
+    }
+  }));
+
+  const userMap = new Map();
+  let totalBytes = 0;
+  for (const track of tracks) {
+    const size = Number(track.fileSizeBytes) || (5 * 1024 * 1024);
+    totalBytes += size;
+    const identity = identitiesByUid.get(String(track.uploadedBy || '')) || resolveUploaderIdentity(track);
+    if (!userMap.has(identity.userKey)) {
+      userMap.set(identity.userKey, { ...identity, trackCount: 0, totalBytes: 0 });
+    }
+    const userData = userMap.get(identity.userKey);
+    userData.trackCount += 1;
+    userData.totalBytes += size;
+  }
+
+  const totalGB = totalBytes / (1024 ** 3);
+  const configuredFreeTier = Number(process.env.R2_FREE_TIER_GB);
+  const freeTierGB = Number.isFinite(configuredFreeTier) && configuredFreeTier >= 0 ? configuredFreeTier : 10;
+  const billableGB = Math.max(0, totalGB - freeTierGB);
+  const totalEstimatedMonthlyCostUSD = billableGB * costPerGBUSD;
+  const userBreakdown = [...userMap.values()].map((user) => {
+    const userGB = user.totalBytes / (1024 ** 3);
+    const userShare = totalBytes > 0 ? user.totalBytes / totalBytes : 0;
+    const userBillableGB = Math.max(0, userGB - freeTierGB * userShare);
+    return {
+      userKey: user.userKey,
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      trackCount: user.trackCount,
+      totalBytes: user.totalBytes,
+      totalMB: Number((user.totalBytes / (1024 ** 2)).toFixed(2)),
+      totalGB: Number(userGB.toFixed(3)),
+      sharePercentage: Number((userShare * 100).toFixed(1)),
+      estimatedMonthlyCostUSD: Number((userBillableGB * costPerGBUSD).toFixed(4))
+    };
+  }).sort((left, right) => right.totalBytes - left.totalBytes);
+
+  return {
+    ok: true,
+    admin,
+    summary: {
+      totalTracks: tracks.length,
+      totalUsers: userBreakdown.length,
+      totalStorageBytes: totalBytes,
+      totalStorageMB: Number((totalBytes / (1024 ** 2)).toFixed(2)),
+      totalStorageGB: Number(totalGB.toFixed(3)),
+      r2FreeTierGB: freeTierGB,
+      billableGB: Number(billableGB.toFixed(3)),
+      totalEstimatedMonthlyCostUSD: Number(totalEstimatedMonthlyCostUSD.toFixed(4)),
+      costPerGBUSD,
+      monthlyBudgetUSD,
+      overBudget: monthlyBudgetUSD !== null && totalEstimatedMonthlyCostUSD > monthlyBudgetUSD
+    },
+    userBreakdown
+  };
+};
+
+const buildAdminPendingCounts = async () => {
+  await migrateGenreStatuses();
+  const counts = { pending: 0, exported: 0, classified: 0, needsReview: 0 };
+  for (const track of await listTracks()) {
+    if (track.genreStatus === 'pending') counts.pending += 1;
+    if (track.genreStatus === 'exported') counts.exported += 1;
+    if (track.genreStatus === 'classified') counts.classified += 1;
+    if (track.genreStatus === 'needs_review') counts.needsReview += 1;
+  }
+  return counts;
+};
+
+const buildAdminBatchList = async () => {
+  const batches = await listExportBatches();
+  const result = [];
+  for (const batch of batches) {
+    const current = await updateBatchStatus(batch.batchId);
+    const ageDays = Math.floor((Date.now() - new Date(batch.createdAt).getTime()) / 86400000);
+    result.push({ ...current, ageDays, stale: ageDays > 7 });
+  }
+  return result;
+};
+
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   try {
-    const admin = await getAdminConfig();
-    if (!admin) {
-      return res.status(403).json({ message: 'Access denied: no admin has been claimed.' });
-    }
-
-    const tracks = await listTracks();
-    const R2_COST_PER_GB_USD = 0.015; // $0.015/GB beyond 10GB free tier
-
-    const userMap = new Map();
-    let totalBytes = 0;
-
-    for (const track of tracks) {
-      const size = Number(track.fileSizeBytes) || (5 * 1024 * 1024); // fallback ~5MB
-      totalBytes += size;
-
-      const userKey = track.uploadedByEmail || track.uploadedBy || 'Community';
-      const userName = track.uploadedByName || userKey.split('@')[0] || 'Community Uploader';
-
-      if (!userMap.has(userKey)) {
-        userMap.set(userKey, {
-          userKey,
-          email: track.uploadedByEmail || (userKey.includes('@') ? userKey : 'N/A'),
-          displayName: userName,
-          trackCount: 0,
-          totalBytes: 0,
-          tracks: []
-        });
-      }
-
-      const userData = userMap.get(userKey);
-      userData.trackCount += 1;
-      userData.totalBytes += size;
-      userData.tracks.push({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        sizeBytes: size,
-        createdAt: track.createdAt
-      });
-    }
-
-    const totalGB = totalBytes / (1024 * 1024 * 1024);
-    const freeTierGB = 10;
-    const billableGB = Math.max(0, totalGB - freeTierGB);
-    const totalEstimatedMonthlyCostUSD = billableGB * R2_COST_PER_GB_USD;
-
-    const userBreakdown = Array.from(userMap.values()).map((u) => {
-      const userGB = u.totalBytes / (1024 * 1024 * 1024);
-      const userShare = totalBytes > 0 ? (u.totalBytes / totalBytes) : 0;
-      const userBillableGB = Math.max(0, userGB - (freeTierGB * userShare));
-      return {
-        userKey: u.userKey,
-        email: u.email,
-        displayName: u.displayName,
-        trackCount: u.trackCount,
-        totalBytes: u.totalBytes,
-        totalMB: Number((u.totalBytes / (1024 * 1024)).toFixed(2)),
-        totalGB: Number(userGB.toFixed(3)),
-        sharePercentage: Number((userShare * 100).toFixed(1)),
-        estimatedMonthlyCostUSD: Number((userBillableGB * R2_COST_PER_GB_USD).toFixed(4))
-      };
-    }).sort((a, b) => b.totalBytes - a.totalBytes);
-
-    res.json({
-      ok: true,
-      admin: admin || null,
-      summary: {
-        totalTracks: tracks.length,
-        totalUsers: userBreakdown.length,
-        totalStorageBytes: totalBytes,
-        totalStorageMB: Number((totalBytes / (1024 * 1024)).toFixed(2)),
-        totalStorageGB: Number(totalGB.toFixed(3)),
-        r2FreeTierGB: freeTierGB,
-        billableGB: Number(billableGB.toFixed(3)),
-        totalEstimatedMonthlyCostUSD: Number(totalEstimatedMonthlyCostUSD.toFixed(4)),
-        costPerGBUSD: R2_COST_PER_GB_USD
-      },
-      userBreakdown
-    });
+    const payload = await buildAdminStatsPayload();
+    if (!payload) return res.status(403).json({ message: 'Access denied: no admin has been claimed.' });
+    return sendEtaggedJson(req, res, payload, 'private, max-age=60, stale-while-revalidate=60');
   } catch (error) {
     console.error('[admin stats] error', error);
-    res.status(500).json({ message: error.message });
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/admin/summary', requireAdmin, async (req, res) => {
+  try {
+    const [stats, pending, batches] = await Promise.all([
+      buildAdminStatsPayload(), buildAdminPendingCounts(), buildAdminBatchList()
+    ]);
+    if (!stats) return res.status(403).json({ message: 'Access denied: no admin has been claimed.' });
+    return sendEtaggedJson(req, res, { stats, pending, recentBatches: batches.slice(0, 10) }, 'private, max-age=15, stale-while-revalidate=30');
+  } catch (error) {
+    console.error('[admin summary] error', error);
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/admin/identities/backfill', requireAdmin, async (_req, res) => {
+  try {
+    const tracks = await listTracks();
+    const targets = tracks.filter((track) => {
+      const uid = String(track.uploadedBy || '');
+      return uid && !uid.includes('@') && !['anonymous', 'community'].includes(uid.toLowerCase());
+    });
+    return res.status(202).json(startAdminJob({
+      label: 'Backfill uploader identities',
+      total: targets.length,
+      run: async ({ report, step }) => {
+        let updated = 0;
+        const identityByUid = new Map();
+        step('Resolving saved profiles', `Checking ${targets.length} uploaded tracks.`);
+        for (let index = 0; index < targets.length; index += 1) {
+          const track = targets[index];
+          const uid = String(track.uploadedBy);
+          let identity = identityByUid.get(uid);
+          if (!identity) {
+            const profile = await getUserProfile(uid).catch(() => null);
+            const firebaseUser = (!profile?.username || !profile?.email) && isFirebaseConfigured() ? await getCachedFirebaseUser(uid) : null;
+            identity = resolveUploaderIdentity(track, profile, firebaseUser);
+            identityByUid.set(uid, identity);
+            if (firebaseUser && identity.email) {
+              const candidate = identity.displayName === 'Unknown user' ? identity.email.split('@')[0] : identity.displayName;
+              if (candidate && !validateUsername(candidate)) await saveUserProfile({ uid, email: identity.email, username: candidate }).catch(() => {});
+            }
+          }
+          const patch = {};
+          if (identity.displayName !== 'Unknown user' && identity.displayName !== 'Community') patch.uploadedByName = identity.displayName;
+          if (identity.email) patch.uploadedByEmail = identity.email;
+          if (Object.keys(patch).length) {
+            const result = await updateTrackIf(track.id, {}, patch);
+            if (result) updated += 1;
+          }
+          report({ step: 'Writing track identity', done: index + 1, total: targets.length, message: `Updated ${updated} of ${targets.length} tracks` });
+        }
+        invalidateCatalogCache();
+        return { updated, total: targets.length, message: `Backfilled uploader identity on ${updated} tracks.` };
+      }
+    }));
+  } catch (error) {
+    console.error('[admin identity backfill] failed', error);
+    return res.status(500).json({ message: 'Unable to start identity backfill.' });
   }
 });
 
@@ -1648,9 +1881,9 @@ app.use((error, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-cron.schedule('0 * * * *', () => {
-  precomputeDailyMixes().catch((error) => console.error('[recommendations] hourly precompute failed', error));
-});
+cron.schedule(String(process.env.DAILY_MIX_CRON || '5 0 * * *'), () => {
+  precomputeUniversalDailyMix().catch((error) => console.error('[recommendations] daily precompute failed', error));
+}, { timezone: process.env.DAILY_MIX_TIMEZONE || 'UTC' });
 app.listen(port, '0.0.0.0', () => {
   console.log(`Sonara backend running on http://0.0.0.0:${port}`);
   console.log(`Catalog store: ${storageMode()} | Object storage: ${isStorageConfigured() ? 'configured' : 'NOT configured'} | Auth: ${isFirebaseConfigured() ? 'configured' : 'disabled'}`);

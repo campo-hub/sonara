@@ -2,10 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
 import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadCachedRecommendations, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveCachedRecommendations, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
 import { buildAccentPalette } from './colorUtils.js';
-import { queryCache } from './lib/queryCache.js';
-import { createRouteHash, parseHashRoute } from './lib/routes.js';
-import { useActionMap } from './lib/useAction.js';
-import { ProgressSteps } from './lib/ProgressSteps.jsx';
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
@@ -30,12 +26,6 @@ const CATALOG_TIMEOUT_MS = 8000;
 const CATALOG_ETAG_KEY = 'sonara.web.catalog.etag.v1';
 const CATALOG_RETRY_DELAYS = [1500, 4000];
 const AUDIO_EXTENSIONS = /\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma|m4b|m4r)$/i;
-const adminCacheKeys = (uid) => {
-  const prefix = `admin:${uid || 'anonymous'}`;
-  return { summary: `${prefix}:summary` };
-};
-const invalidateAdminCache = (uid) => Object.values(adminCacheKeys(uid)).forEach((key) => queryCache.invalidate(key));
-const playlistsCacheKey = (uid) => `user:${uid || 'anonymous'}:playlists`;
 
 const fallbackCatalog = [
   { id: 'seed-night-drive', title: 'Night Drive', artist: 'Sonara Studio', album: 'Afterglow', seconds: 232, audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', addedAt: Date.now() - 1000 },
@@ -149,17 +139,19 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 const navItems = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'library', label: 'Library', icon: 'library' },
+  { id: 'all-music', label: 'All Music', icon: 'music' },
   { id: 'playlists', label: 'Playlists', icon: 'list' },
   { id: 'favorites', label: 'Favorites', icon: 'heart' },
   { id: 'upload', label: 'Upload', icon: 'upload' },
   { id: 'lab', label: 'Lab', icon: 'palette' }
 ];
 
-const mobileTabs = ['home', 'library', 'playlists', 'lab'];
+const mobileTabs = ['home', 'library', 'all-music', 'lab'];
 const protectedViews = new Set(['upload', 'playlists', 'favorites']);
 
 const pageMeta = {
   library: { title: 'Library', subtitle: 'Everything you have saved, in one place.' },
+  'all-music': { title: 'All Music', subtitle: '' },
   playlists: { title: 'Playlists', subtitle: 'Collections built around your sound and mood.' },
   favorites: { title: 'Favorites', subtitle: 'The songs you keep coming back to.' },
   upload: { title: 'Add music', subtitle: 'Bring in tracks, albums or whole folders. Big batches go in small groups.' },
@@ -815,6 +807,7 @@ function EmptyState({ icon = 'music', title, text, action }) {
 /* Each page gets its own pigment banner, so color comes from the room and not from big type. */
 const BANNER_STYLES = {
   library: { bg: '#2F4B6E', fg: '#F1E9D6', palette: 0, pattern: 1 },
+  'all-music': { bg: '#D9A441', fg: '#16150F', palette: 1, pattern: 0 },
   playlists: { bg: '#5E7B4F', fg: '#F1E9D6', palette: 2, pattern: 3 },
   favorites: { bg: '#B4533C', fg: '#F6E9DA', palette: 3, pattern: 4 },
   upload: { bg: '#26251F', fg: '#F1E9D6', palette: 5, pattern: 2 },
@@ -1234,12 +1227,11 @@ function Stage({ track, isPlaying, spin, isLiked, onLike, contextLabel, upNext, 
 
 export default function App() {
   /* navigation + preferences */
-  const initialRoute = parseHashRoute(window.location.hash);
-  const [view, setView] = useState(initialRoute.view);
+  const [view, setView] = useState('home');
   const [playlistId, setPlaylistId] = useState('');
-  const [libraryTab, setLibraryTab] = useState(initialRoute.libraryTab || 'songs');
+  const [libraryTab, setLibraryTab] = useState('songs');
   const [labTab, setLabTab] = useState('themes');
-  const [query, setQuery] = useState(initialRoute.query || '');
+  const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('name');
   const [collectionFilter, setCollectionFilter] = useState('all');
   const [dailyRecommendations, setDailyRecommendations] = useState(() => ({ state: loadCachedRecommendations() ? 'ready' : 'loading', ...(loadCachedRecommendations() || { dateKey: '', mixes: [], next: null }) }));
@@ -1248,8 +1240,6 @@ export default function App() {
   const [featuredHistory, setFeaturedHistory] = useState(loadFeaturedHistory);
   const [playHistory, setPlayHistory] = useState(loadPlayHistory);
   const [notice, setNotice] = useState('');
-  const routeScrollPositionsRef = useRef(new Map());
-  const activeRouteHashRef = useRef(initialRoute.hash);
   const playProgressRef = useRef({ trackId: '', lastTime: 0, listenedSeconds: 0, qualified: false });
   const localPrefKeysRef = useRef(loadStoredPrefKeys());
   const dirtyPrefKeysRef = useRef(new Set());
@@ -1264,7 +1254,6 @@ export default function App() {
   const [usernameError, setUsernameError] = useState('');
   const [pendingAdminClaim, setPendingAdminClaim] = useState(false);
   const [userPlaylists, setUserPlaylists] = useState([]);
-  const [genrePlaylists, setGenrePlaylists] = useState([]);
   const [playlistMenuTrack, setPlaylistMenuTrack] = useState(null);
   const [playlistComposer, setPlaylistComposer] = useState(null);
   const [playlistDraft, setPlaylistDraft] = useState('');
@@ -1283,92 +1272,6 @@ export default function App() {
   const [adminCsvName, setAdminCsvName] = useState('');
   const [adminPreview, setAdminPreview] = useState(null);
   const [adminActionLoading, setAdminActionLoading] = useState(false);
-  const [adminStatsUpdatedAt, setAdminStatsUpdatedAt] = useState(0);
-  const adminActions = useActionMap();
-  const [adminActivityOpen, setAdminActivityOpen] = useState(false);
-  const [adminActivity, setAdminActivity] = useState([]);
-  const [adminCostSearch, setAdminCostSearch] = useState('');
-  const [adminCostSort, setAdminCostSort] = useState('totalBytes');
-  const [adminCostSortDirection, setAdminCostSortDirection] = useState(-1);
-  const [adminCopiedEmail, setAdminCopiedEmail] = useState('');
-
-  useEffect(() => {
-    let restoreFrame = 0;
-    const syncRoute = () => {
-      const previousHash = activeRouteHashRef.current;
-      if (previousHash && previousHash !== window.location.hash) {
-        routeScrollPositionsRef.current.set(previousHash, window.scrollY);
-      }
-      const route = parseHashRoute(window.location.hash);
-      if (route.hash !== window.location.hash) {
-        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${route.hash}`);
-      }
-      activeRouteHashRef.current = route.hash;
-      setView(route.view);
-      setLibraryTab(route.libraryTab || 'songs');
-      setPlaylistId(route.playlistId || '');
-      setQuery(route.query || '');
-      cancelAnimationFrame(restoreFrame);
-      restoreFrame = requestAnimationFrame(() => {
-        window.scrollTo(0, routeScrollPositionsRef.current.get(route.hash) || 0);
-      });
-    };
-
-    window.addEventListener('hashchange', syncRoute);
-    syncRoute();
-    return () => {
-      window.removeEventListener('hashchange', syncRoute);
-      cancelAnimationFrame(restoreFrame);
-    };
-  }, []);
-
-  useEffect(() => {
-    const isLivingRoom = () => window.innerWidth >= 2560;
-    const handleRemoteKeys = (event) => {
-      if (!isLivingRoom()) return;
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (event.key === 'Escape' || event.key === 'Backspace') {
-        if (window.history.length > 1) {
-          event.preventDefault();
-          window.history.back();
-        }
-        return;
-      }
-      const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-      const direction = directions[event.key];
-      if (!direction) return;
-      const candidates = [...document.querySelectorAll('button:not(:disabled), a[href], [tabindex="0"]')]
-        .filter((element) => element instanceof HTMLElement && element.offsetParent !== null);
-      if (!candidates.length) return;
-      const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const currentIndex = candidates.indexOf(current);
-      if (currentIndex < 0) {
-        event.preventDefault();
-        candidates[0].focus();
-        return;
-      }
-      const origin = candidates[currentIndex].getBoundingClientRect();
-      const originX = origin.left + origin.width / 2;
-      const originY = origin.top + origin.height / 2;
-      const [stepX, stepY] = direction;
-      const next = candidates.map((element) => {
-        const rect = element.getBoundingClientRect();
-        const dx = rect.left + rect.width / 2 - originX;
-        const dy = rect.top + rect.height / 2 - originY;
-        const primary = stepX ? dx * stepX : dy * stepY;
-        if (primary <= 0) return null;
-        const secondary = stepX ? Math.abs(dy) : Math.abs(dx);
-        return { element, score: primary + secondary * 1.5 };
-      }).filter(Boolean).sort((left, right) => left.score - right.score)[0];
-      if (next) {
-        event.preventDefault();
-        next.element.focus();
-      }
-    };
-    window.addEventListener('keydown', handleRemoteKeys);
-    return () => window.removeEventListener('keydown', handleRemoteKeys);
-  }, []);
 
   useEffect(() => {
     fetch(`${apiBase}/admin/check`)
@@ -2160,6 +2063,7 @@ export default function App() {
     setFeaturedTrack(next);
     setFeaturedHistory((previous) => [...previous.filter((id) => id !== next.id), next.id].slice(-10));
   }, [allTracks, featuredHistory, featuredTrack, recentPlayedIds]);
+  const discoverTracks = useMemo(() => allTracks.filter((track) => !favoriteTracks.some((liked) => liked.id === track.id)).slice(0, 5), [allTracks, favoriteTracks]);
 
   const visibleTracks = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -2824,6 +2728,26 @@ export default function App() {
                     <CoverArt track={track} size="fill" />
                     <span className="tile-play">
                       <Icon name={current?.id === track.id && isPlaying ? 'pause' : 'play'} size={18} />
+                    </span>
+                  </span>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="block">
+          <SectionHead title="Discover" note="Fresh picks from the stack" />
+          <div className="sleeve-grid">
+            {discoverTracks.map((track, index) => (
+              <div key={track.id} className="tile">
+                <button type="button" className="tile-hit" onClick={() => playFromList(discoverTracks, index, 'Discover')}>
+                  <span className="tile-art">
+                    <CoverArt track={track} size="fill" />
+                    <span className="tile-play">
+                      <Icon name="play" size={18} />
                     </span>
                   </span>
                   <strong>{track.title}</strong>
@@ -3563,6 +3487,7 @@ export default function App() {
         <main className="home-main">
           <section className="home-section mixes-section"><SectionHead title={authUser ? `Picked for ${displayName}` : 'Picked for today'} note="Recommended" />{dailyRecommendations.state === 'loading' && <div className="shelf-skeleton" aria-label="Loading recommendations" />}{dailyRecommendations.state === 'error' && <EmptyState icon="refresh" title="Recommendations are resting" text="Try again when the catalog is reachable." action={<button type="button" className="btn" onClick={() => setRecommendationRefresh((value) => value + 1)}>Retry</button>} />}{dailyRecommendations.state === 'ready' && <div className="mix-shelf" tabIndex="0">{recommendedMixes.map((mix, index) => <article key={mix.id} className="recommendation-card"><button type="button" className="recommendation-art" onClick={() => startPlayback(mix.tracks, 0, mix.name, true)} aria-label={`Play ${mix.name}`}><span className="mix-stamp">No. {String(index + 1).padStart(2, '0')}</span><CoverArt track={mix.tracks[0]} size="fill" /><span className="tile-play"><Icon name="play" size={18} /></span></button><span className="feature-kicker">Recommended</span><strong>{mix.name}</strong><small>{mix.tracks.length} songs · {totalRuntime(mix.tracks)}</small><button type="button" className={`icon-btn heart ${mix.saved ? 'is-on' : ''}`} onClick={() => saveMix(mix)} aria-label={mix.saved ? 'Saved mix' : `Save ${mix.name}`}><Icon name="heart" size={18} filled={mix.saved} /></button></article>)}</div>}{dailyRecommendations.state === 'ready' && recommendedMixes.length < 10 && <p className="mix-footnote">Add more music to unlock 10 mixes.</p>}</section>
           <section className="home-section collection-section"><SectionHead title="Your collection" note="Playlists, uploads, and saved mixes" /><div className="chips" role="group" aria-label="Collection filter">{[['all', 'All'], ['mixes', 'Mixes'], ['playlists', 'Playlists'], ['uploads', 'Uploads']].map(([id, label]) => <button key={id} type="button" className={`chip ${collectionFilter === id ? 'is-active' : ''}`} aria-pressed={collectionFilter === id} onClick={() => setCollectionFilter(id)}>{label}</button>)}</div><div className="collection-grid">{filteredCollection.slice(0, 12).map((item) => <article key={item.id} className="collection-tile"><button type="button" onClick={item.open}><CoverArt track={item.tracks[0] || { id: item.id }} size="sm" /><span><strong>{item.name}</strong><small>{item.kind} · {plural(item.tracks.length, 'track')}</small></span></button><button type="button" className="tile-fab" disabled={!item.tracks.length} onClick={() => startPlayback(item.tracks, 0, item.name)} aria-label={`Play ${item.name}`}><Icon name="play" size={16} /></button></article>)}</div></section>
+          <section className="home-section discover-section"><SectionHead title="Discover" note="A fresh handful from your catalog" /><div className="sleeve-grid">{discoverTracks.map((track, index) => <div key={track.id} className="tile"><button type="button" className="tile-hit" onClick={() => playFromList(discoverTracks, index, 'Discover')}><span className="tile-art"><CoverArt track={track} size="fill" /><span className="tile-play"><Icon name="play" size={18} /></span></span><strong>{track.title}</strong><small>{track.artist}</small></button></div>)}</div></section>
         </main>
 
         <aside className="home-rail home-history-rail"><section className="home-panel history-panel"><SectionHead title="Recently played" action={<button type="button" className="text-btn" onClick={() => setPlayHistory([])}>Clear</button>} />{recentHistoryTracks.length ? <ol className="history-list">{recentHistoryTracks.slice(0, 15).map((track, index) => <li key={track.id}><button type="button" onClick={() => playRecent(track)}><CoverArt track={track} size="sm" /><span><strong>{track.title}</strong><small>{track.artist}</small></span><time>{relativeTime(playHistory[index]?.at)}</time><i className={current?.id === track.id && isPlaying ? 'is-playing' : ''} /></button></li>)}</ol> : <><EmptyState icon="clock" title="Nothing played yet" text="Play something and it will show up here." /><div className="new-arrivals"><strong>New arrivals</strong>{recentlyAddedTracks.slice(0, 5).map((track) => <button key={track.id} type="button" onClick={() => playFromList(recentlyAddedTracks, recentlyAddedTracks.indexOf(track), 'New arrivals')}><CoverArt track={track} size="sm" /><span>{track.title}</span></button>)}</div></>}</section></aside>

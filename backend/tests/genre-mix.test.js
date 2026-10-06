@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeGenre, getAllowedGenres } from '../src/genres.js';
-import { buildGenreAwareDailyMix, exportCatalogCsv } from '../src/genreMixUtils.js';
+import { buildGenreAwareDailyMix, buildGenrePlaylists, exportCatalogCsv } from '../src/genreMixUtils.js';
 
 const makeTrack = (id, title, artist, genre) => ({
   id,
@@ -45,4 +45,18 @@ test('genre-aware daily mix prefers recognized genres but stays deterministic', 
   assert.equal(first.length, 3);
   assert.deepEqual(first.map((track) => track.id), second.map((track) => track.id));
   assert.ok(first.some((track) => normalizeGenre(track.genre) === 'Hip-Hop'));
+});
+
+test('genre playlists group playable tracks, omit untagged and empty genres, and include cover samples', () => {
+  const playlists = buildGenrePlaylists([
+    { ...makeTrack('1', 'A', 'Artist A', 'Gospel'), cover: '/cover-a.jpg' },
+    { ...makeTrack('2', 'B', 'Artist B', 'gospel'), cover: '/cover-b.jpg' },
+    { ...makeTrack('3', 'C', 'Artist C', 'Hip-Hop'), audioUrl: '' },
+    { id: '4', title: 'No tag', audioUrl: '/4.mp3' }
+  ]);
+
+  assert.deepEqual(playlists.map((playlist) => playlist.genre), ['Gospel']);
+  assert.equal(playlists[0].trackCount, 2);
+  assert.deepEqual(playlists[0].trackIds, ['1', '2']);
+  assert.deepEqual(playlists[0].covers, ['/cover-a.jpg', '/cover-b.jpg']);
 });

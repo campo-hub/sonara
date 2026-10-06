@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sonara.app.api.SonaraApiClient
-import com.sonara.app.api.RemoteRecommendationMix
 import com.sonara.app.dj.DJSessionPlanner
 import com.sonara.app.dj.ListeningHistory
 import com.sonara.app.dj.PreferenceEngine
@@ -127,7 +126,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val list = allTracks
             return when (sortType) {
                 "Name" -> if (isSortAscending) list.sortedBy { it.title.lowercase() } else list.sortedByDescending { it.title.lowercase() }
-                "Artist" -> if (isSortAscending) list.sortedBy { it.artist.lowercase() } else list.sortedByDescending { it.artist.lowercase() }
                 "Date" -> if (isSortAscending) list.sortedBy { it.dateAdded } else list.sortedByDescending { it.dateAdded }
                 "Size" -> if (isSortAscending) list.sortedBy { it.size } else list.sortedByDescending { it.size }
                 else -> list
@@ -352,13 +350,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         get() = _remoteTracks.value
         private set(value) { _remoteTracks.value = value }
 
-    var dailyRecommendationName by mutableStateOf("Daily Mix")
-        private set
-    var dailyRecommendationTracks by mutableStateOf<List<Track>>(emptyList())
-        private set
-    var genrePlaylists by mutableStateOf<List<Folder>>(emptyList())
-        private set
-
     fun toggleOnlineMode(online: Boolean) {
         isOnlineMode = online
         prefs.edit().putBoolean("is_online_mode", online).apply()
@@ -497,22 +488,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val tracks: List<Track> = apiClient.fetchCatalog(apiBaseUrl)
                 _remoteTracks.value = tracks
                 allTracks = tracks
-
-                val tracksByRemoteId = tracks.mapNotNull { track -> track.remoteId?.let { it to track } }.toMap()
-                val mixes: List<RemoteRecommendationMix> = apiClient.fetchDailyRecommendations(apiBaseUrl)
-                mixes.firstOrNull()?.let { mix ->
-                    dailyRecommendationName = mix.name
-                    dailyRecommendationTracks = mix.trackIds.mapNotNull { tracksByRemoteId[it] }
-                }
-                genrePlaylists = apiClient.fetchGenrePlaylists(apiBaseUrl).mapNotNull { playlist ->
-                    val playlistTracks = playlist.trackIds.mapNotNull { tracksByRemoteId[it] }
-                    if (playlistTracks.isEmpty()) null else Folder(
-                        name = playlist.name,
-                        trackCount = playlistTracks.size,
-                        tracks = playlistTracks,
-                        coverArtUri = playlistTracks.firstNotNullOfOrNull { it.albumArtUri }
-                    )
-                }
 
                 // Group remote tracks into folders
                 val groupedMap = tracks.groupBy { it.folderName }

@@ -27,3 +27,7 @@ function getAuthClient() {
 export async function verifyIdToken(token) {
   return getAuthClient().verifyIdToken(token);
 }
+
+export async function getFirebaseUserRecord(uid) {
+  return getAuthClient().getUser(uid);
+}

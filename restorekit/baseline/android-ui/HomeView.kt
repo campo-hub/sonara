@@ -96,12 +96,12 @@ private fun OnlineTransitionScreen(
     val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
     val accent = themeViewModel.getAccentColor(isDark)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bg),
-        contentAlignment = Alignment.Center
-    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -481,7 +481,6 @@ private fun OnlineHomeView(
         }
     }
 }
-}
 
 @Composable
 private fun OfflineHomeView(
@@ -523,13 +522,16 @@ private fun OfflineHomeView(
             }
         }
     }
-    val fallbackDailyMix = remember(allTracks, viewModel.userEmail) {
+    val dailyMix = remember(allTracks, viewModel.userEmail) {
         val dateKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
         buildDailyMixTracks(allTracks, viewModel.userEmail ?: viewModel.username ?: "guest", dateKey, 5)
     }
-    val dailyMix = viewModel.dailyRecommendationTracks.take(5).ifEmpty { fallbackDailyMix }
     val isPlaying = viewModel.isPlaying
     val spotlightTrack = if (isPlaying && current != null) current else featuredTrack
+    val discoverTracks = remember(allTracks, recentIds) {
+        allTracks.filterNot { it.id in recentIds }.take(5)
+    }
+
     val soundscapes = remember(viewModel.userPlaylists, viewModel.folders) {
         val list = mutableListOf<SoundscapeItem>()
         val favs = viewModel.userPlaylists.find { it.name == "Favorites" }
@@ -774,7 +776,7 @@ private fun OfflineHomeView(
                                     color = accent,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.clickable { viewModel.selectedTab = 1 }
+                                    modifier = Modifier.clickable { viewModel.selectedTab = 2 }
                                 )
                             }
 
@@ -841,7 +843,7 @@ private fun OfflineHomeView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = viewModel.dailyRecommendationName,
+                            text = "Daily recommended mix",
                             color = text,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -876,6 +878,79 @@ private fun OfflineHomeView(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     CoverArt(track = track, sizeDp = 58.dp)
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        text = track.title,
+                                        color = text,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = track.artist,
+                                        color = muted,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (discoverTracks.isNotEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 24.dp, bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Discover",
+                            color = text,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            text = "Surprise me",
+                            color = accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { featuredTrack?.let { track -> val idx = allTracks.indexOfFirst { it.id == track.id }; viewModel.playFromList(allTracks, if (idx >= 0) idx else 0, "Discover") } }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        discoverTracks.forEach { track ->
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { val idx = allTracks.indexOfFirst { it.id == track.id }; viewModel.playFromList(allTracks, if (idx >= 0) idx else 0, "Discover") },
+                                shape = RoundedCornerShape(20.dp),
+                                color = paper,
+                                border = BorderStroke(1.dp, line)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CoverArt(track = track, sizeDp = 54.dp)
                                     Spacer(Modifier.height(10.dp))
                                     Text(
                                         text = track.title,
@@ -1061,7 +1136,7 @@ private fun OfflineHomeView(
                     color = accent,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { viewModel.selectedTab = 1 }
+                    modifier = Modifier.clickable { viewModel.selectedTab = 2 }
                 )
             }
         }

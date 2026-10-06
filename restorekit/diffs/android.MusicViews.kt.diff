@@ -1,0 +1,289 @@
+--- old/sonara/android/app/src/main/java/com/castmobile/sender/ui/MusicViews.kt	2026-09-29 18:01:48.000000000 +0000
++++ new/sonara/android/app/src/main/java/com/castmobile/sender/ui/MusicViews.kt	2026-10-05 11:17:19.560207316 +0000
+@@ -27,154 +27,6 @@
+ import kotlin.math.abs
+ 
+ /* -------------------------------------------------------------------------- */
+-/*  All Music View                                                            */
+-/* -------------------------------------------------------------------------- */
+-
+-@Composable
+-fun LiquidAllMusic(
+-    viewModel: MainViewModel,
+-    themeViewModel: ThemeViewModel,
+-    systemDark: Boolean,
+-    onAddTrack: (Track) -> Unit,
+-    onTrackClick: (Track, List<Track>) -> Unit
+-) {
+-    val isDark = themeViewModel.isDark(systemDark)
+-    val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
+-    val paper = if (isDark) SonaraDesign.DarkPaper else SonaraDesign.LightPaper
+-    val line = if (isDark) SonaraDesign.DarkLine else SonaraDesign.LightLine
+-    val text = if (isDark) SonaraDesign.DarkText else SonaraDesign.LightText
+-    val muted = if (isDark) SonaraDesign.DarkMuted else SonaraDesign.LightMuted
+-    val accent = themeViewModel.getAccentColor(isDark)
+-
+-    var searchQuery by remember { mutableStateOf("") }
+-    val allTracks = viewModel.sortedTracks
+-    val filteredTracks = allTracks.filter {
+-        it.title.contains(searchQuery, ignoreCase = true) ||
+-        it.artist.contains(searchQuery, ignoreCase = true) ||
+-        it.album.contains(searchQuery, ignoreCase = true)
+-    }
+-
+-    LazyColumn(
+-        modifier = Modifier
+-            .fillMaxSize()
+-            .background(bg),
+-        contentPadding = PaddingValues(bottom = 180.dp)
+-    ) {
+-        // Banner Header
+-        item {
+-            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
+-                PageBanner(
+-                    title = "All Music",
+-                    subtitle = if (searchQuery.length > 0) "${filteredTracks.size} results for \"$searchQuery\"" else "${allTracks.size} tracks",
+-                    tone = SonaraDesign.SoundscapeTones[2]
+-                )
+-            }
+-        }
+-
+-        // Search & Sort Bar
+-        item {
+-            Column(
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .padding(horizontal = 20.dp)
+-                    .padding(bottom = 16.dp)
+-            ) {
+-                // Search Input
+-                Surface(
+-                    modifier = Modifier.fillMaxWidth(),
+-                    shape = RoundedCornerShape(999.dp),
+-                    color = paper,
+-                    border = BorderStroke(1.dp, line)
+-                ) {
+-                    Row(
+-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+-                        verticalAlignment = Alignment.CenterVertically
+-                    ) {
+-                        Icon(
+-                            imageVector = Icons.Default.Search,
+-                            contentDescription = null,
+-                            tint = muted,
+-                            modifier = Modifier.size(18.dp)
+-                        )
+-                        Spacer(Modifier.width(10.dp))
+-                        BasicTextField(
+-                            value = searchQuery,
+-                            onValueChange = { searchQuery = it },
+-                            modifier = Modifier.weight(1f),
+-                            textStyle = TextStyle(color = text, fontSize = 14.sp),
+-                            cursorBrush = SolidColor(accent),
+-                            singleLine = true,
+-                            decorationBox = { innerTextField ->
+-                                if (searchQuery.isEmpty()) {
+-                                    Text("Search your library", color = muted, fontSize = 14.sp)
+-                                }
+-                                innerTextField()
+-                            }
+-                        )
+-                        if (searchQuery.length > 0) {
+-                            IconButton(
+-                                onClick = { searchQuery = "" },
+-                                modifier = Modifier.size(20.dp)
+-                            ) {
+-                                Icon(
+-                                    imageVector = Icons.Default.Close,
+-                                    contentDescription = "Clear",
+-                                    tint = muted,
+-                                    modifier = Modifier.size(16.dp)
+-                                )
+-                            }
+-                        }
+-                    }
+-                }
+-
+-                Spacer(Modifier.height(14.dp))
+-
+-                // Sort Chips
+-                Row(
+-                    modifier = Modifier.fillMaxWidth(),
+-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+-                    verticalAlignment = Alignment.CenterVertically
+-                ) {
+-                    Text("Sort by", color = muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+-                    listOf("Name", "Artist", "Date", "Size").forEach { type ->
+-                        val selected = viewModel.sortType == type
+-                        Text(
+-                            text = type,
+-                            color = if (selected) text else muted,
+-                            fontSize = 13.sp,
+-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+-                            modifier = Modifier
+-                                .clickable { viewModel.sortType = type }
+-                                .padding(vertical = 4.dp)
+-                        )
+-                    }
+-                }
+-            }
+-        }
+-
+-        // Tracklist
+-        itemsIndexed(filteredTracks) { index, track ->
+-            TrackRow(
+-                trackIndex = index + 1,
+-                track = track,
+-                isCurrent = viewModel.currentTrack?.id == track.id,
+-                isPlaying = viewModel.isPlaying && viewModel.currentTrack?.id == track.id,
+-                isLiked = viewModel.favoriteTracks.value.contains(track.id),
+-                showWaveform = themeViewModel.showWaveforms,
+-                compact = themeViewModel.compactRows,
+-                accentColor = accent,
+-                textColor = text,
+-                mutedColor = muted,
+-                lineColor = line,
+-                onPlay = { viewModel.playFromList(filteredTracks, index, "All Music") },
+-                onToggleLike = { viewModel.toggleFavorite(track.id) },
+-                onShowOptions = { onAddTrack(track) }
+-            )
+-        }
+-    }
+-}
+-
+-/* -------------------------------------------------------------------------- */
+ /*  Library View                                                              */
+ /* -------------------------------------------------------------------------- */
+ 
+@@ -184,6 +36,8 @@
+     themeViewModel: ThemeViewModel,
+     systemDark: Boolean,
+     onCreatePlaylist: () -> Unit,
++    onAddTrack: (Track) -> Unit,
++    gridColumns: Int = 2,
+     onFolderClick: (Folder) -> Unit
+ ) {
+     val isDark = themeViewModel.isDark(systemDark)
+@@ -195,12 +49,17 @@
+     val accent = themeViewModel.getAccentColor(isDark)
+ 
+     var selectedTab by remember { mutableIntStateOf(0) }
++    var searchQuery by remember { mutableStateOf("") }
+ 
+-    val libraryTracks = remember(viewModel.allTracks) {
+-        viewModel.allTracks.sortedByDescending { it.dateAdded }
++    val libraryTracks = remember(viewModel.sortedTracks, searchQuery) {
++        viewModel.sortedTracks.filter {
++            it.title.contains(searchQuery, ignoreCase = true) ||
++                it.artist.contains(searchQuery, ignoreCase = true) ||
++                it.album.contains(searchQuery, ignoreCase = true)
++        }
+     }
+-    val albumPairs = remember(viewModel.folders) { viewModel.folders.chunked(2) }
+-    val artistPairs = remember(viewModel.artistFolders) { viewModel.artistFolders.chunked(2) }
++    val albumPairs = remember(viewModel.folders, gridColumns) { viewModel.folders.chunked(gridColumns.coerceAtLeast(1)) }
++    val artistPairs = remember(viewModel.artistFolders, gridColumns) { viewModel.artistFolders.chunked(gridColumns.coerceAtLeast(1)) }
+ 
+     LazyColumn(
+         modifier = Modifier
+@@ -258,6 +117,42 @@
+ 
+         when (selectedTab) {
+             0 -> {
++                item {
++                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
++                        Surface(
++                            modifier = Modifier.fillMaxWidth(),
++                            shape = RoundedCornerShape(999.dp),
++                            color = paper,
++                            border = BorderStroke(1.dp, line)
++                        ) {
++                            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
++                                Icon(Icons.Default.Search, contentDescription = null, tint = muted, modifier = Modifier.size(18.dp))
++                                Spacer(Modifier.width(10.dp))
++                                BasicTextField(
++                                    value = searchQuery,
++                                    onValueChange = { searchQuery = it },
++                                    modifier = Modifier.weight(1f),
++                                    textStyle = TextStyle(color = text, fontSize = 14.sp),
++                                    cursorBrush = SolidColor(accent),
++                                    singleLine = true,
++                                    decorationBox = { innerTextField ->
++                                        if (searchQuery.isEmpty()) Text("Search your library", color = muted, fontSize = 14.sp)
++                                        innerTextField()
++                                    }
++                                )
++                            }
++                        }
++                        Spacer(Modifier.height(14.dp))
++                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
++                            Text("Sort by", color = muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
++                            listOf("Name", "Artist", "Date", "Size").forEach { type ->
++                                val selected = viewModel.sortType == type
++                                Text(type, color = if (selected) text else muted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.clickable { viewModel.sortType = type }.padding(vertical = 4.dp))
++                            }
++                        }
++                    }
++                }
++
+                 // Songs Tab
+                 itemsIndexed(libraryTracks, key = { _, track -> track.id }) { index, track ->
+                     TrackRow(
+@@ -274,7 +169,7 @@
+                         lineColor = line,
+                         onPlay = { viewModel.playFromList(libraryTracks, index, "Library") },
+                         onToggleLike = { viewModel.toggleFavorite(track.id) },
+-                        onShowOptions = { }
++                        onShowOptions = { onAddTrack(track) }
+                     )
+                 }
+             }
+@@ -357,6 +252,48 @@
+                     }
+                 }
+ 
++                if (viewModel.genrePlaylists.isNotEmpty()) {
++                    item(key = "genre_playlist_heading") {
++                        Text(
++                            "Genres",
++                            color = text,
++                            fontSize = 16.sp,
++                            fontWeight = FontWeight.Bold,
++                            modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp)
++                        )
++                    }
++                    itemsIndexed(viewModel.genrePlaylists, key = { _: Int, folder: Folder -> "genre:${folder.name}" }) { _, folder ->
++                        Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
++                            Surface(
++                                onClick = { onFolderClick(folder) },
++                                modifier = Modifier.fillMaxWidth(),
++                                shape = RoundedCornerShape(16.dp),
++                                color = paper,
++                                border = BorderStroke(1.dp, line)
++                            ) {
++                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
++                                    CoverArt(track = folder.tracks.firstOrNull(), sizeDp = 48.dp)
++                                    Spacer(Modifier.width(14.dp))
++                                    Column(modifier = Modifier.weight(1f)) {
++                                        Text(folder.name, color = text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
++                                        Text("Genre · ${folder.tracks.size} tracks", color = muted, fontSize = 12.sp)
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++
++                item(key = "user_playlist_heading") {
++                    Text(
++                        "Your playlists",
++                        color = text,
++                        fontSize = 16.sp,
++                        fontWeight = FontWeight.Bold,
++                        modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp)
++                    )
++                }
++
+                 itemsIndexed(viewModel.userPlaylists, key = { _: Int, folder: Folder -> folder.name }) { _, folder: Folder ->
+                     Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                         Surface(

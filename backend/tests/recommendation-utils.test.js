@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { generateDailyMixSnapshot, getPlayableTracks, getRecommendationSizing } from '../src/recommendationUtils.js';
+import { generateDailyMixSnapshot, generateUniversalDailyMixSnapshot, getPlayableTracks, getRecommendationSizing } from '../src/recommendationUtils.js';
 
 const catalogOf = (count) => Array.from({ length: count }, (_, index) => ({
   id: `track-${index}`,
@@ -57,4 +57,34 @@ test('artist ordering avoids back-to-back artists when alternatives exist', () =
 
 test('playable track helper normalizes ids and removes unplayable rows', () => {
   assert.deepEqual(getPlayableTracks([{ id: 1, audioUrl: 'x' }, { id: 2 }]).map((track) => track.id), ['1']);
+});
+
+test('universal daily mixes are deterministic and use genre names for everyone', () => {
+  const catalog = [
+    ...Array.from({ length: 6 }, (_, index) => ({ ...catalogOf(1)[0], id: `gospel-${index}`, artist: `Gospel Artist ${index % 3}`, genre: 'Gospel', createdAt: `2026-09-${String(index + 1).padStart(2, '0')}` })),
+    ...Array.from({ length: 6 }, (_, index) => ({ ...catalogOf(1)[0], id: `hip-hop-${index}`, artist: `Rap Artist ${index % 3}`, genre: 'Hip-Hop', createdAt: `2026-09-${String(index + 11).padStart(2, '0')}` })),
+    { id: 'untagged', audioUrl: 'audio', artist: 'No Genre', genre: '' }
+  ];
+
+  const first = generateUniversalDailyMixSnapshot({ catalog, dateKey: '2026-10-05' });
+  const repeated = generateUniversalDailyMixSnapshot({ catalog, dateKey: '2026-10-05' });
+  assert.deepEqual(first, repeated);
+  assert.equal(first.mixes.some((mix) => mix.name === 'Gospel Mix'), true);
+  assert.equal(first.mixes.some((mix) => mix.name === 'Hip-Hop Mix'), true);
+  assert.equal(first.mixes.every((mix) => !mix.name.startsWith('Sonara Set')), true);
+  assert.ok(first.mixes.length <= 8);
+
+  for (const mix of first.mixes.filter((item) => item.flavor === 'genre')) {
+    assert.ok(mix.subtitle.split(' · ').length <= 3);
+    assert.ok(mix.trackIds.every((id) => catalog.find((track) => track.id === id)?.genre === mix.name.replace(/ Mix$/, '')));
+  }
+});
+
+test('universal mixes skip underfilled genres and fall back to Daily Mix', () => {
+  const catalog = catalogOf(4).map((track) => ({ ...track, genre: 'Gospel' }));
+  const snapshot = generateUniversalDailyMixSnapshot({ catalog, dateKey: '2026-10-05' });
+  assert.equal(snapshot.mixes[0].name, 'Daily Mix');
+  assert.equal(snapshot.mixes.some((mix) => mix.name === 'Gospel Mix'), false);
+  assert.equal(snapshot.mixes.some((mix) => mix.name === 'New Arrivals'), true);
+  assert.equal(snapshot.mixes.some((mix) => mix.name === 'Deep Cuts'), true);
 });
