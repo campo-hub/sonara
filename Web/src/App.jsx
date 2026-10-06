@@ -3589,7 +3589,7 @@ export default function App() {
               <EmptyState icon="refresh" title="Recommendations are resting" text="Try again when the catalog is reachable." action={<button type="button" className="btn" onClick={() => setRecommendationRefresh((value) => value + 1)}>Retry</button>} />
             )}
             {dailyRecommendations.state === 'ready' && (
-              <div className="mix-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, mixFit.columns)}, minmax(0, 1fr))`, minHeight: 220 }}>
+              <div className="mix-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, mixFit.columns)}, minmax(0, ${mixFit.cardSize}px))`, minHeight: 220 }}>
                 {recommendedMixes.slice(0, 12).map((mix, index) => (
                   <article key={mix.id} className="recommendation-card" style={{ minHeight: `${Math.max(120, mixFit.cardSize || 150)}px` }}>
                     <button type="button" className="recommendation-art" onClick={() => startPlayback(mix.tracks, 0, mix.name, true)} aria-label={`Play ${mix.name}`}>

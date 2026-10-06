@@ -10,8 +10,7 @@ export function useMixGridFit(ref, count) {
 
     const measure = () => {
       const width = element.clientWidth || 0;
-      const height = element.clientHeight || 0;
-      setFit(computeMixGridFit({ width, height, count: count || 0 }));
+      setFit(computeMixGridFit({ width, count: count || 0 }));
     };
 
     measure();
