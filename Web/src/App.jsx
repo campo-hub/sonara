@@ -1244,6 +1244,7 @@ export default function App() {
   const [sortKey, setSortKey] = useState('name');
   const [collectionFilter, setCollectionFilter] = useState('all');
   const [dailyRecommendations, setDailyRecommendations] = useState(() => ({ state: loadCachedRecommendations() ? 'ready' : 'loading', ...(loadCachedRecommendations() || { dateKey: '', mixes: [], next: null }) }));
+  const [savedMixes, setSavedMixes] = useState([]);
   const [recommendationRefresh, setRecommendationRefresh] = useState(0);
   const [prefs, setPrefs] = useState(loadPrefs);
   const [featuredHistory, setFeaturedHistory] = useState(loadFeaturedHistory);
@@ -1612,6 +1613,7 @@ export default function App() {
     } finally {
       setAuthUser(null);
       setUserPlaylists([]);
+      setSavedMixes([]);
       setLibraryHydrated(false);
       setNotice('Signed out.');
     }
@@ -1852,6 +1854,25 @@ export default function App() {
   useEffect(() => {
     let active = true;
     if (!authUid) {
+      setSavedMixes([]);
+      return () => { active = false; };
+    }
+    (async () => {
+      try {
+        const response = await authenticatedJsonRequest(`${apiBase}/me/mixes`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Unable to load your saved mixes.');
+        if (active) setSavedMixes(Array.isArray(data) ? data : []);
+      } catch (error) {
+        if (active) setNotice(error.message || 'Unable to load your saved mixes.');
+      }
+    })();
+    return () => { active = false; };
+  }, [authUid]);
+
+  useEffect(() => {
+    let active = true;
+    if (!authUid) {
       setLibraryHydrated(false);
       setUserPlaylists([]);
       hydratedUidRef.current = null;
@@ -2074,6 +2095,10 @@ export default function App() {
     ...mix,
     tracks: (mix.trackIds || []).map((id) => trackById.get(String(id))).filter(Boolean)
   })), [dailyRecommendations.mixes, trackById]);
+  const savedMixesWithTracks = useMemo(() => savedMixes.map((mix) => ({
+    ...mix,
+    tracks: (mix.trackIds || []).map((id) => trackById.get(String(id))).filter(Boolean)
+  })), [savedMixes, trackById]);
 
   const recentUploads = useMemo(() => {
     const seen = new Set();
@@ -2690,8 +2715,8 @@ export default function App() {
   const collectionItems = useMemo(() => [
     { id: 'favorites', name: 'Favorites', kind: 'playlists', tracks: favoriteTracks, open: () => goTo('favorites') },
     ...playlists.map((playlist) => ({ id: playlist.id, name: playlist.name, kind: playlist.dynamic ? 'uploads' : 'playlists', tracks: playlist.tracks, open: () => openPlaylist(playlist.id) })),
-    ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({ id: mix.savedId || mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
-  ], [favoriteTracks, playlists, recommendedMixes]);
+    ...savedMixesWithTracks.map((mix) => ({ id: mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
+  ], [favoriteTracks, playlists, savedMixesWithTracks]);
 
   const mixGridRef = useRef(null);
   const collectionRef = useRef(null);
@@ -2712,8 +2737,8 @@ export default function App() {
         tracks: playlist.tracks,
         open: () => openPlaylist(playlist.id)
       })),
-      ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({
-        id: mix.savedId || mix.id,
+      ...savedMixesWithTracks.map((mix) => ({
+        id: mix.id,
         name: mix.name,
         kind: 'Mixes',
         tracks: mix.tracks,
@@ -3535,7 +3560,7 @@ export default function App() {
     const collectionItems = [
       { id: 'favorites', name: 'Favorites', kind: 'playlists', tracks: favoriteTracks, open: () => goTo('favorites') },
       ...playlists.map((playlist) => ({ id: playlist.id, name: playlist.name, kind: playlist.dynamic ? 'uploads' : 'playlists', tracks: playlist.tracks, open: () => openPlaylist(playlist.id) })),
-      ...recommendedMixes.filter((mix) => mix.saved).map((mix) => ({ id: mix.savedId || mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
+      ...savedMixesWithTracks.map((mix) => ({ id: mix.id, name: mix.name, kind: 'mixes', tracks: mix.tracks, open: () => startPlayback(mix.tracks, 0, mix.name) }))
     ];
     const filteredCollection = collectionItems.filter((item) => collectionFilter === 'all' || item.kind === collectionFilter);
     const visibleCollection = filteredCollection.slice(0, collectionVisibleCount || Math.min(filteredCollection.length, 8));
@@ -3546,6 +3571,7 @@ export default function App() {
         const response = await authenticatedJsonRequest(`${apiBase}/me/mixes`, { method: 'POST', body: JSON.stringify({ dailyMixId: mix.id, dateKey: dailyRecommendations.dateKey }) });
         const saved = await response.json();
         if (!response.ok) throw new Error(saved.message || 'Unable to save this mix.');
+        setSavedMixes((previous) => [saved, ...previous.filter((item) => item.id !== saved.id)]);
         setDailyRecommendations((previous) => ({ ...previous, mixes: previous.mixes.map((item) => item.id === mix.id ? { ...item, saved: true, savedId: saved.id } : item) }));
         setNotice('Saved to your collection.');
       } catch (error) { setNotice(error.message || 'Unable to save this mix.'); }
