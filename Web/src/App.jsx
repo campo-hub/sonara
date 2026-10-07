@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authenticatedJsonRequest, createAccountWithEmail, getCurrentIdToken, isFirebaseConfigured, signInWithEmail, signInWithGoogle, signOutUser, subscribeToAuth, updateUserProfile } from './firebaseAuth';
-import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadCachedRecommendations, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveCachedRecommendations, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
+import { buildDailyMix, clearCachedCatalog, getCachedCatalog, isSampleCatalog, loadCachedRecommendations, loadCachedSavedMixes, loadFeaturedHistory, loadPlayHistory, mergePlaylistList, normalizePlaylistShape, pickRandomFeaturedTrack, qualifiesForPlayHistory, saveCachedCatalog, saveCachedRecommendations, saveCachedSavedMixes, saveFeaturedHistory, savePlayHistory, updatePlayHistory } from './catalogUtils.js';
 import { buildAccentPalette } from './colorUtils.js';
 import { queryCache } from './lib/queryCache.js';
 import { createRouteHash, parseHashRoute } from './lib/routes.js';
@@ -107,7 +107,7 @@ const explainCatalogError = (error) => {
   if (error?.status >= 500) return `The server answered ${error.status}. It may still be starting up, or it crashed. Check the Render logs.`;
   if (error?.status) return `The server answered ${error.status}.`;
   if (isAbortError(error)) return 'The server took too long to answer. Render free plans can need up to a minute to wake up.';
-  return `The browser could not reach ${apiBase}/catalog. Check VITE_API_URL, and that the server allows this site in its CORS settings.`;
+  return `The browser could not reach ${apiBase}/catalog. Render may still be waking up or returning a gateway error; check /api/health first. If health is available, then verify the server allows this site in its CORS settings.`;
 };
 
 const getUserDisplayName = (user) => {
@@ -1857,12 +1857,17 @@ export default function App() {
       setSavedMixes([]);
       return () => { active = false; };
     }
+    setSavedMixes(loadCachedSavedMixes(authUid));
     (async () => {
       try {
         const response = await authenticatedJsonRequest(`${apiBase}/me/mixes`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Unable to load your saved mixes.');
-        if (active) setSavedMixes(Array.isArray(data) ? data : []);
+        if (active) {
+          const mixes = Array.isArray(data) ? data : [];
+          setSavedMixes(mixes);
+          saveCachedSavedMixes(authUid, mixes);
+        }
       } catch (error) {
         if (active) setNotice(error.message || 'Unable to load your saved mixes.');
       }
@@ -3572,6 +3577,7 @@ export default function App() {
         const saved = await response.json();
         if (!response.ok) throw new Error(saved.message || 'Unable to save this mix.');
         setSavedMixes((previous) => [saved, ...previous.filter((item) => item.id !== saved.id)]);
+        saveCachedSavedMixes(authUser.uid, [saved, ...savedMixes.filter((item) => item.id !== saved.id)]);
         setDailyRecommendations((previous) => ({ ...previous, mixes: previous.mixes.map((item) => item.id === mix.id ? { ...item, saved: true, savedId: saved.id } : item) }));
         setNotice('Saved to your collection.');
       } catch (error) { setNotice(error.message || 'Unable to save this mix.'); }

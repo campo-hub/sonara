@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isSampleCatalog, getCachedCatalog, saveCachedCatalog, clearCachedCatalog, pickRandomFeaturedTrack, buildDailyMix, normalizePlaylistShape, mergePlaylistList, qualifiesForPlayHistory, updatePlayHistory } from '../src/catalogUtils.js';
+import { isSampleCatalog, getCachedCatalog, saveCachedCatalog, clearCachedCatalog, loadCachedSavedMixes, saveCachedSavedMixes, pickRandomFeaturedTrack, buildDailyMix, normalizePlaylistShape, mergePlaylistList, qualifiesForPlayHistory, updatePlayHistory } from '../src/catalogUtils.js';
 
 test('sample seeds are rejected as stale cached catalog data', () => {
   const songs = [{ id: 'seed-night-drive', title: 'Night Drive' }];
@@ -20,6 +20,15 @@ test('real catalog data is saved and restored from the cache', () => {
   saveCachedCatalog(songs);
   assert.deepEqual(getCachedCatalog(), songs);
   clearCachedCatalog();
+});
+
+test('saved mixes are cached per account for offline fallback', () => {
+  const mixes = [{ id: 'saved-mix-1', trackIds: ['track-1'] }];
+  saveCachedSavedMixes('account-one', mixes);
+
+  assert.deepEqual(loadCachedSavedMixes('account-one'), mixes);
+  assert.deepEqual(loadCachedSavedMixes('account-two'), []);
+  assert.deepEqual(loadCachedSavedMixes(''), []);
 });
 
 test('pickRandomFeaturedTrack excludes recently featured songs and prefers playable catalog entries', () => {

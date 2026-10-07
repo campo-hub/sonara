@@ -22,7 +22,7 @@
     <script type="module">
       const apiBase = String(import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
       if (apiBase) {
-        try { fetch(`${apiBase}/health`, { cache: 'no-store', credentials: 'omit' }); } catch {}
+        try { fetch(`${apiBase}/health`, { cache: 'no-store', credentials: 'omit' }).catch(() => {}); } catch {}
         try { document.head.insertAdjacentHTML('beforeend', `<link rel="preconnect" href="${new URL(apiBase).origin}" crossorigin>`); } catch {}
       }
     </script>

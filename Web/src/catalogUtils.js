@@ -3,6 +3,7 @@ const LEGACY_CATALOG_CACHE_KEYS = ['sonara.web.catalog.v1'];
 const FEATURED_HISTORY_KEY = 'sonara.web.featured.history.v2';
 const PLAY_HISTORY_KEY = 'sonara.web.play.history.v1';
 const MAX_PLAY_HISTORY = 7;
+const SAVED_MIXES_CACHE_KEY = 'sonara.web.saved-mixes.v1';
 const RECOMMENDATIONS_CACHE_KEY = 'sonara.web.recommendations.v1';
 const fallbackMemoryStore = new Map();
 
@@ -92,6 +93,22 @@ export const loadPlayHistory = () => readStoredList(PLAY_HISTORY_KEY)
 export const savePlayHistory = (history) => {
   const next = Array.isArray(history) ? history.slice(0, MAX_PLAY_HISTORY) : [];
   writeStoredList(PLAY_HISTORY_KEY, next);
+  return next;
+};
+
+export const loadCachedSavedMixes = (ownerUid) => {
+  if (!ownerUid) return [];
+  return readStoredList(`${SAVED_MIXES_CACHE_KEY}:${encodeURIComponent(String(ownerUid))}`)
+    .filter((mix) => mix && typeof mix.id === 'string' && Array.isArray(mix.trackIds))
+    .slice(0, 200);
+};
+
+export const saveCachedSavedMixes = (ownerUid, mixes) => {
+  if (!ownerUid) return [];
+  const next = Array.isArray(mixes)
+    ? mixes.filter((mix) => mix && typeof mix.id === 'string' && Array.isArray(mix.trackIds)).slice(0, 200)
+    : [];
+  writeStoredList(`${SAVED_MIXES_CACHE_KEY}:${encodeURIComponent(String(ownerUid))}`, next);
   return next;
 };
 
