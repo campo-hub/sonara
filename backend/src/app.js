@@ -9,8 +9,12 @@ import healthRoutes from './modules/health/routes.js';
 import userRoutes from './modules/users/routes.js';
 import { requireAuth } from './middleware/auth.js';
 import { createProductRouter } from './modules/products/routes.js';
+import { createOrderRouter } from './modules/orders/routes.js';
 
-export function createApp({ productRouter = createProductRouter() } = {}) {
+export function createApp({
+  productRouter = createProductRouter(),
+  orderRouter = createOrderRouter()
+} = {}) {
   const app = express();
   const disableSharedCaching = (_req, res, next) => {
     res.set('Cache-Control', 'private, no-store');
@@ -41,6 +45,7 @@ export function createApp({ productRouter = createProductRouter() } = {}) {
   app.use('/api', healthRoutes);
   app.use('/api/me', userRoutes);
   app.use('/api', productRouter);
+  app.use('/api', orderRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

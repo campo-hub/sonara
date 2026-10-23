@@ -255,6 +255,95 @@ export async function updateProduct(id, update, expectedStatus) {
   return result || null;
 }
 
+export async function reserveProductQuantity(id, quantity, expectedProduct = null) {
+  const collection = await getProductsCollection();
+  if (!collection) {
+    const product = memoryProducts.get(id);
+    if (!product || product.status !== 'active'
+      || product.quantityAvailable - (product.quantityReserved || 0) < quantity
+      || (expectedProduct && (
+        product.sellerUid !== expectedProduct.sellerUid
+        || product.title !== expectedProduct.title
+        || product.unit !== expectedProduct.unit
+        || product.pricePerUnit !== expectedProduct.pricePerUnit
+        || product.minOrder !== expectedProduct.minOrder
+      ))) return null;
+    const saved = { ...product, quantityReserved: (product.quantityReserved || 0) + quantity };
+    memoryProducts.set(id, saved);
+    return saved;
+  }
+  const result = await collection.findOneAndUpdate(
+    {
+      id,
+      status: 'active',
+      ...(expectedProduct ? {
+        sellerUid: expectedProduct.sellerUid,
+        title: expectedProduct.title,
+        unit: expectedProduct.unit,
+        pricePerUnit: expectedProduct.pricePerUnit,
+        minOrder: expectedProduct.minOrder
+      } : {}),
+      $expr: {
+        $gte: [
+          { $subtract: ['$quantityAvailable', { $ifNull: ['$quantityReserved', 0] }] },
+          quantity
+        ]
+      }
+    },
+    { $inc: { quantityReserved: quantity }, $set: { updatedAt: new Date() } },
+    { returnDocument: 'after', projection: { _id: 0 } }
+  );
+  return result || null;
+}
+
+export async function releaseProductQuantity(id, quantity) {
+  const collection = await getProductsCollection();
+  if (!collection) {
+    const product = memoryProducts.get(id);
+    if (!product || (product.quantityReserved || 0) < quantity) {
+      throw new Error(`Cannot release ${quantity} reserved units for product ${id}.`);
+    }
+    const saved = { ...product, quantityReserved: product.quantityReserved - quantity };
+    memoryProducts.set(id, saved);
+    return saved;
+  }
+  const result = await collection.findOneAndUpdate(
+    { id, quantityReserved: { $gte: quantity } },
+    { $inc: { quantityReserved: -quantity }, $set: { updatedAt: new Date() } },
+    { returnDocument: 'after', projection: { _id: 0 } }
+  );
+  if (!result) throw new Error(`Cannot release ${quantity} reserved units for product ${id}.`);
+  return result;
+}
+
+export async function consumeProductReservation(id, quantity) {
+  const collection = await getProductsCollection();
+  if (!collection) {
+    const product = memoryProducts.get(id);
+    if (!product || (product.quantityReserved || 0) < quantity || product.quantityAvailable < quantity) {
+      throw new Error(`Cannot consume ${quantity} reserved units for product ${id}.`);
+    }
+    const saved = {
+      ...product,
+      quantityAvailable: product.quantityAvailable - quantity,
+      quantityReserved: product.quantityReserved - quantity,
+      updatedAt: new Date()
+    };
+    memoryProducts.set(id, saved);
+    return saved;
+  }
+  const result = await collection.findOneAndUpdate(
+    { id, quantityReserved: { $gte: quantity }, quantityAvailable: { $gte: quantity } },
+    {
+      $inc: { quantityAvailable: -quantity, quantityReserved: -quantity },
+      $set: { updatedAt: new Date() }
+    },
+    { returnDocument: 'after', projection: { _id: 0 } }
+  );
+  if (!result) throw new Error(`Cannot consume ${quantity} reserved units for product ${id}.`);
+  return result;
+}
+
 export async function productHasOrders(productId) {
   const collection = await getProductsCollection();
   if (!collection) return false;

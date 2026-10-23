@@ -57,6 +57,12 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `GET /api/categories` — returns supported marketplace product categories.
 - `GET /api/products` — public searchable product browse with category, county, KES price, location/radius, sort, and cursor pagination filters; returns thumbnails only.
 - `GET /api/sellers/:uid` — public seller profile and active, available listings; private account fields are not returned.
+- `POST /api/orders` — authenticated checkout; server-priced cart quantities are reserved for 15 minutes and split into separate orders per seller.
+- `GET /api/orders` and `GET /api/orders/:id` — private buyer order history/details, with seller access limited to their own orders.
+- `GET /api/seller/orders` — authenticated seller order list.
+- `POST /api/orders/:id/cancel` — buyer cancellation before seller confirmation; releases reserved stock.
+- `POST /api/orders/:id/confirm`, `/dispatch`, and `/deliver` — seller-owned order lifecycle actions; confirmation requires payment.
+- `POST /api/orders/:id/complete` — buyer confirms delivery and commits reserved stock.
 - `POST /api/products` — seller-only multipart listing creation with up to five processed images.
 - `GET /api/products/:id` — public active product detail; non-active listings are private to owner/admin.
 - `PATCH /api/products/:id` — owner/admin listing edits and image removal/reordering/addition.
@@ -72,7 +78,7 @@ The legacy music endpoints, catalog synchronization, uploads, playlists, recomme
 npm test
 ```
 
-Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, and thumbnail-only public responses. Tests mock Firebase token verification and external storage/database access.
+Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, thumbnail-only public responses, checkout snapshots and seller splits, stock reservation/rollback/expiry, and order access/state transitions. Tests mock Firebase token verification and external storage/database access.
 
 ## Deployment
 

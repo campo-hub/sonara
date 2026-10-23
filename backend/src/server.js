@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createApp } from './app.js';
 import { assertRuntimeConfig, config } from './config.js';
 import { closeDb, ensureIndexes, getDb } from './db.js';
+import { orderService } from './modules/orders/service.js';
 
 export async function startServer() {
   assertRuntimeConfig();
@@ -11,6 +12,13 @@ export async function startServer() {
   if (db) await ensureIndexes(db);
 
   const server = createServer(createApp());
+  const reservationTimer = setInterval(() => {
+    orderService.expireReservations().catch((error) => {
+      console.error('Order reservation expiry failed; reserved stock may need reconciliation.');
+    });
+  }, 60_000);
+  reservationTimer.unref();
+  server.once('close', () => clearInterval(reservationTimer));
   await new Promise((resolveListen, reject) => {
     server.once('error', reject);
     server.listen(config.port, resolveListen);

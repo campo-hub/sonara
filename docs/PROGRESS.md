@@ -60,7 +60,7 @@ Three pre-existing modifications in `android/app/src/main/java/com/castmobile/se
 | Integer-only KES parsing and formatting | DONE | Tests cover grouped KES strings, exact formatting, decimals, malformed values and unsafe integers |
 | Phase 2 backend tests | DONE | `npm --prefix backend test` — 16 passed, 0 failed |
 
-MongoDB was not configured locally; index declarations were verified using a mock database. No rounding rule for fractional quantity × unit price is assumed in this phase; order line totals are validated as whole-shilling integers, with checkout computation to be defined in Phase 5.
+MongoDB was not configured locally; index declarations were verified using a mock database. Fractional quantity × unit price is rounded to the nearest whole KES per line during Phase 5 checkout.
 
 ## Phase 3 — Product API and image upload
 
@@ -100,4 +100,16 @@ MongoDB was not configured locally; browse database queries are covered through 
 
 ## Phase 5 — Checkout and orders
 
-**Not started.** Product decisions are recorded in [`DECISIONS.md`](./DECISIONS.md); begin implementation only after the user asks to continue.
+| Item | Status | Verification |
+|---|---|---|
+| Checkout request validation; reject client-supplied prices and unsupported fields | DONE | Order-route tests cover altered price inputs and malformed checkout requests |
+| Server-side product price snapshots and whole-KES line rounding | DONE | Tests check per-line nearest-shilling totals using authoritative product prices |
+| Split a multi-seller cart into individual seller orders | DONE | HTTP test checks separate order records, totals, and delivery details per seller |
+| Stock reservations with rollback when any cart item cannot be reserved | DONE | Service tests verify insufficient-stock rollback leaves no partial hold/order |
+| 15-minute reservation expiry and periodic cleanup | DONE | Tests verify expired orders are cancelled and reserved stock is released |
+| Buyer/seller order history, access control, and cancellation | DONE | HTTP tests cover private order reads, buyer cancellation, and seller ownership |
+| Seller order state transitions and buyer delivery completion | DONE | HTTP tests cover payment prerequisite, seller-only transitions, and stock consumption |
+| Backend tests | DONE | `npm --prefix backend test` — 36 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+
+Product-level delivery negotiation is outside platform checkout; the order records delivery details and the platform does not add or collect a delivery fee. Payment-provider initiation and callbacks remain for a later phase. MongoDB was unavailable locally; database persistence and stock concurrency still require configured-database verification. Product decisions and additional checkout choices are recorded in [`DECISIONS.md`](./DECISIONS.md).
