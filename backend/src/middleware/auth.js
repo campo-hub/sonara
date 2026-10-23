@@ -24,3 +24,27 @@ export function createRequireAuth(verifyToken = verifyIdToken) {
 }
 
 export const requireAuth = createRequireAuth();
+
+export function createOptionalAuth(verifyToken = verifyIdToken) {
+  return async function optionalAuth(req, _res, next) {
+    req.user = null;
+    const match = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+    if (!match) return next();
+    try {
+      const decoded = await verifyToken(match[1]);
+      if (decoded?.uid) {
+        req.user = {
+          uid: decoded.uid,
+          email: decoded.email || '',
+          email_verified: decoded.email_verified === true,
+          name: decoded.name || ''
+        };
+      }
+      return next();
+    } catch {
+      return next();
+    }
+  };
+}
+
+export const optionalAuth = createOptionalAuth();

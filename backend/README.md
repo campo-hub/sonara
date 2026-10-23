@@ -27,6 +27,7 @@ Copy `.env.example` to `.env` for local setup and provide values locally; never 
 | `MONGODB_URI` | MongoDB connection string |
 | `MONGODB_DB_NAME` | Database name (defaults to `agristore`) |
 | `ADMIN_EMAILS` | Comma-separated admin emails; Firebase email verification is required |
+| `MODERATE_LISTINGS` | Set to `true` to create new product listings as pending |
 | `FIREBASE_PROJECT_ID` | Firebase project used for Admin token verification |
 | `FIREBASE_CLIENT_EMAIL` | Firebase service-account client email |
 | `FIREBASE_PRIVATE_KEY` | Firebase service-account private key |
@@ -53,6 +54,12 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `GET /api/auth/me` — returns the authenticated Firebase user's verified token claims.
 - `GET /api/me/profile` — returns the signed-in user's profile.
 - `PUT /api/me/profile` — creates or updates the signed-in user's username.
+- `POST /api/products` — seller-only multipart listing creation with up to five processed images.
+- `GET /api/products/:id` — public active product detail; non-active listings are private to owner/admin.
+- `PATCH /api/products/:id` — owner/admin listing edits and image removal/reordering/addition.
+- `POST /api/products/:id/pause` and `/resume` — owner/admin listing visibility controls.
+- `DELETE /api/products/:id` — owner/admin soft-removes products referenced by orders; otherwise removes listing and image objects.
+- `GET /api/me/products` — seller's products in all statuses.
 
 The legacy music endpoints, catalog synchronization, uploads, playlists, recommendations, and admin-claim flow have been removed.
 

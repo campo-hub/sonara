@@ -62,4 +62,23 @@ Three pre-existing modifications in `android/app/src/main/java/com/castmobile/se
 
 MongoDB was not configured locally; index declarations were verified using a mock database. No rounding rule for fractional quantity × unit price is assumed in this phase; order line totals are validated as whole-shilling integers, with checkout computation to be defined in Phase 5.
 
-Phase 3 has not started.
+## Phase 3 — Product API and image upload
+
+| Item | Status | Verification |
+|---|---|---|
+| Seller product creation and seller-owned product listing routes | DONE | HTTP tests cover 401/403, create response and own listing status |
+| Product detail visibility and owner/admin editing | DONE | HTTP tests confirm active product visibility and non-active owner-only reads |
+| Pause/resume and ownership-protected deletion | DONE | HTTP tests cover status transitions and non-owner edit/delete rejection |
+| Soft-delete products referenced by orders; hard-delete otherwise with R2 cleanup | DONE | Mock store/storage tests cover both branches |
+| Multipart limits: 5 images, 5 MB each, bounded fields/parts | DONE | HTTP tests cover oversize and six-file rejection |
+| JPEG/PNG/WebP magic-byte validation and Sharp WebP processing | DONE | Tests reject SVG bytes with a `.jpg` filename; successful processing asserts WebP output and metadata removal |
+| R2 image pairs, thumbnails, immutable cache headers, upload rollback | DONE | Mock storage tests verify public URLs/cache headers and partial-upload cleanup |
+| Approximate coordinates rounded to two decimals | DONE | Product create test checks the stored GeoJSON point |
+| Upload rate limit keyed by authenticated seller | DONE | Test confirms a seller's second request is limited while another seller has a separate quota |
+| Backend tests | DONE | `npm --prefix backend test` — 24 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+| Clean backend dependency install | DONE | `npm --prefix backend ci --no-fund --no-audit` completed |
+
+MongoDB and R2 were not configured locally; persistence and object storage were tested with injected mocks. Live marketplace deployment remains unverified.
+
+Phase 4 has not started.

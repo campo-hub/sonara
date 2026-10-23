@@ -21,6 +21,7 @@ export const config = Object.freeze({
     privateKey: String(env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
   }),
   adminEmails: new Set(splitList(env.ADMIN_EMAILS).map((email) => email.toLowerCase())),
+  moderateListings: env.MODERATE_LISTINGS === 'true',
   corsOrigins: new Set([
     ...splitList(env.CORS_ORIGIN),
     ...(!isProduction ? ['http://localhost:5173'] : [])

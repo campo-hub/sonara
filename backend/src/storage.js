@@ -30,9 +30,15 @@ function getClient() {
   return client;
 }
 
-export async function putObject(key, body, contentType) {
+export async function putObject(key, body, contentType, { cacheControl } = {}) {
   const bucket = config.r2.bucketName;
-  await getClient().send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+  await getClient().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    ...(cacheControl ? { CacheControl: cacheControl } : {})
+  }));
 }
 
 export async function deleteObject(key) {
