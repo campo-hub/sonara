@@ -1,0 +1,12 @@
+{
+  "name": "AgriStore — Kenyan farm produce",
+  "short_name": "AgriStore",
+  "start_url": "/sonara/",
+  "scope": "/sonara/",
+  "display": "standalone",
+  "background_color": "#f7f8f3",
+  "theme_color": "#23523a",
+  "icons": [
+    { "src": "/sonara/icons/agristore.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
