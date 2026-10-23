@@ -22,6 +22,8 @@ export const INDEX_DEFINITIONS = Object.freeze([
   { collection: 'payments', key: { orderTrackingId: 1 }, options: { unique: true, sparse: true } },
   { collection: 'payments', key: { orderId: 1, createdAt: -1 } },
   { collection: 'reviews', key: { orderId: 1, productId: 1 }, options: { unique: true } },
+  { collection: 'reports', key: { productId: 1, reporterUid: 1 }, options: { unique: true } },
+  { collection: 'reports', key: { status: 1, createdAt: -1 } },
   { collection: 'auditLog', key: { at: -1 } },
   { collection: 'auditLog', key: { actorUid: 1, at: -1 } }
 ]);

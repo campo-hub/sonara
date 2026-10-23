@@ -191,6 +191,21 @@ export function validateReview(review) {
   return '';
 }
 
+export function validateProductReport(report) {
+  if (!isRecord(report)
+    || !isUuid(report.id)
+    || !isUuid(report.productId)
+    || !nonEmptyString(report.reporterUid, 128)
+    || !PRODUCT_REPORT_REASONS.includes(report.reason)
+    || typeof report.details !== 'string'
+    || report.details.length > 500
+    || !['open', 'resolved'].includes(report.status)
+    || !validDate(report.createdAt)) {
+    return 'Product report fields are invalid.';
+  }
+  return '';
+}
+
 export function validateAuditLog(entry) {
   if (!isRecord(entry)) return 'Audit log entry must be an object.';
   if (!validDate(entry.at)

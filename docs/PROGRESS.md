@@ -159,3 +159,17 @@ Notification delivery currently uses the console driver only. Provider delivery,
 | Automated Playwright layout screenshots | BLOCKED | `npm --prefix Web run qa:layout` cannot launch because the Playwright Chromium executable is missing; browser download previously timed out |
 
 The responsive browser check is not a substitute for the automated light/dark screenshot matrix. Full buyer/seller/admin parity and live service integration remain unverified; do not remove the retained legacy app/tests until those flows are explicitly compared.
+
+## Phase 9 — Cleanup, documentation, and operations
+
+| Item | Status | Verification |
+|---|---|---|
+| Add authenticated listing report submission with duplicate protection and per-user rate limiting | DONE | `reports.test.js` verifies valid, duplicate, invalid, and seller-self-report cases |
+| Add admin report queue and reasoned listing takedown with audit event | DONE | `reports.test.js` verifies active listing removal and audit logging |
+| Add AgriStore root/Web READMEs and API, architecture, payments/payouts, privacy, legal-draft, and go-live docs | DONE | Documentation reviewed against current route/config behavior; legal copy is explicitly marked draft-only |
+| Update Render blueprints and backend route docs for AgriStore | DONE | Removed stale Sonara project/database values, unused variables, and invalid Pages path from the CORS origin |
+| Remove all legacy Sonara music app assets/tests and docs | DEFERRED | Retained legacy Web app and regression tests because complete marketplace flow parity is not proven; Android remains the explicitly frozen legacy app |
+| Backend tests | DONE | `npm --prefix backend test` — 53 passed, 0 failed |
+| Web tests and production build | DONE | `npm --prefix Web test` — 34 passed, 0 failed; `npm --prefix Web run build` completed |
+
+The report API stores records in MongoDB when configured and uses an in-memory store for local tests. MongoDB report persistence and the live administrator workflow remain unverified without a configured database. Seller payout automation, self-service account deletion, and external notification delivery remain out of scope for the current implementation and are called out in the operating/legal docs.

@@ -50,6 +50,7 @@ function MarketplaceShell() {
     <Route path="/seller/profile" element={<RequireAuth><Pages.SellerProfile /></RequireAuth>} />
     <Route path="/admin" element={<RequireAuth><Pages.AdminHome /></RequireAuth>} />
     <Route path="/admin/listings" element={<RequireAuth><Pages.AdminListings /></RequireAuth>} />
+    <Route path="/admin/reports" element={<RequireAuth><Pages.AdminReports /></RequireAuth>} />
     <Route path="/admin/orders" element={<RequireAuth><Pages.AdminOrders /></RequireAuth>} />
     <Route path="/sign-in" element={<Pages.SignIn />} />
     <Route path="/account" element={<RequireAuth><Pages.Account /></RequireAuth>} />

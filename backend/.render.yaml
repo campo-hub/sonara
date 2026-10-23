@@ -1,18 +1,18 @@
 services:
   - type: web
-    name: sonara-backend
+    name: agristore-api
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 20.11.0
-      - key: PORT
-        value: 4000
+        value: 20
+      - key: NODE_ENV
+        value: production
       - key: CORS_ORIGIN
-        sync: false
+        value: https://campo-hub.github.io
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID
@@ -26,14 +26,26 @@ services:
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DB_NAME
-        value: sonara
-      - key: CRON_SECRET
-        sync: false
+        value: agristore
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
-      - key: SEED_FALLBACK_CATALOG
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: MODERATE_LISTINGS
         value: "false"
+      - key: PESAPAL_ENVIRONMENT
+        value: sandbox
+      - key: PESAPAL_CONSUMER_KEY
+        sync: false
+      - key: PESAPAL_CONSUMER_SECRET
+        sync: false
+      - key: PESAPAL_CALLBACK_URL
+        sync: false
+      - key: PESAPAL_IPN_URL
+        sync: false
+      - key: PESAPAL_IPN_ID
+        sync: false

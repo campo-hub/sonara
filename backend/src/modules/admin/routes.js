@@ -9,8 +9,9 @@ import {
   listAdminPayments,
   resolveOrderDispute
 } from './store.js';
-import { listProductsByStatus, setSellerProductsStatus, updateProduct } from '../products/store.js';
+import { getProductById, listProductsByStatus, setSellerProductsStatus, updateProduct } from '../products/store.js';
 import { getOrderById } from '../orders/store.js';
+import { getProductReport, listOpenProductReports, resolveProductReport } from '../reports/store.js';
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -52,7 +53,11 @@ export function createAdminRouter({
   listOrders = listAdminOrders,
   listPayments = listAdminPayments,
   getOrder = getOrderById,
-  resolveDispute = resolveOrderDispute
+  getProduct = getProductById,
+  resolveDispute = resolveOrderDispute,
+  listReports = listOpenProductReports,
+  getReport = getProductReport,
+  resolveReport = resolveProductReport
 } = {}) {
   const router = Router();
 const protect = [authMiddleware, requireAdminMiddleware];
@@ -83,6 +88,31 @@ router.get('/admin/listings', ...protect, asyncRoute(async (req, res) => {
     if (!product) throw new HttpError(409, 'Only a pending listing can be rejected.', 'LISTING_STATE_CHANGED');
     await audit({ at: new Date(), actorUid: req.user.uid, action: 'listing.rejected', entity: 'product', entityId: product.id, meta: { reason } });
     res.set('Cache-Control', 'private, no-store').json({ product });
+  }));
+
+  router.get('/admin/reports', ...protect, asyncRoute(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store').json({ reports: await listReports(boundedLimit(req.query.limit)) });
+  }));
+
+  router.post('/admin/reports/:id/takedown', ...protect, asyncRoute(async (req, res) => {
+    const report = await getReport(req.params.id);
+    if (!report || report.status !== 'open') throw new HttpError(404, 'Open listing report not found.', 'REPORT_NOT_FOUND');
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+    if (!reason) throw new HttpError(400, 'A takedown reason is required.', 'INVALID_TAKEDOWN');
+    const product = await changeProduct(report.productId, {
+      status: 'removed',
+      takedownReason: reason,
+      updatedAt: new Date()
+    }, 'active');
+    const currentProduct = product || await getProduct(report.productId);
+    if (!currentProduct) throw new HttpError(404, 'Listing not found.', 'PRODUCT_NOT_FOUND');
+    if (!product && currentProduct.status !== 'removed') {
+      throw new HttpError(409, 'The listing changed; refresh and try again.', 'LISTING_STATE_CHANGED');
+    }
+    const resolved = await resolveReport(report.id);
+    if (!resolved) throw new HttpError(409, 'The report changed; refresh and try again.', 'REPORT_STATE_CHANGED');
+    await audit({ at: new Date(), actorUid: req.user.uid, action: 'listing.taken_down', entity: 'product', entityId: report.productId, meta: { reportId: report.id, reason } });
+    res.set('Cache-Control', 'private, no-store').json({ report: resolved, product: currentProduct });
   }));
 
   router.post('/admin/sellers/:uid/suspend', ...protect, asyncRoute(async (req, res) => {

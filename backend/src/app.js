@@ -13,13 +13,15 @@ import { createOrderRouter } from './modules/orders/routes.js';
 import { createPaymentRouter } from './modules/payments/routes.js';
 import { createReviewRouter } from './modules/reviews/routes.js';
 import { createAdminRouter } from './modules/admin/routes.js';
+import { createReportRouter } from './modules/reports/routes.js';
 
 export function createApp({
   productRouter = createProductRouter(),
   orderRouter = createOrderRouter(),
   paymentRouter = createPaymentRouter(),
   reviewRouter = createReviewRouter(),
-  adminRouter = createAdminRouter()
+  adminRouter = createAdminRouter(),
+  reportRouter = createReportRouter()
 } = {}) {
   const app = express();
   const disableSharedCaching = (_req, res, next) => {
@@ -55,6 +57,7 @@ export function createApp({
   app.use('/api', paymentRouter);
   app.use('/api', reviewRouter);
   app.use('/api', adminRouter);
+  app.use('/api', reportRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -61,9 +61,11 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `GET /api/auth/me` — returns the authenticated Firebase user's verified token claims.
 - `GET /api/me/profile` — returns the signed-in user's profile.
 - `PUT /api/me/profile` — creates or updates the signed-in user's username.
+- `PUT /api/me/seller-profile` — completes seller onboarding and grants the seller role.
 - `GET /api/categories` — returns supported marketplace product categories.
 - `GET /api/products` — public searchable product browse with category, county, KES price, location/radius, sort, and cursor pagination filters; returns thumbnails only.
 - `GET /api/sellers/:uid` — public seller profile and active, available listings; private account fields are not returned.
+- `POST /api/products/:id/reports` — authenticated, rate-limited listing report; one report per account/listing.
 - `POST /api/orders` — authenticated checkout; server-priced cart quantities are reserved for 15 minutes and split into separate orders per seller.
 - `GET /api/orders` and `GET /api/orders/:id` — private buyer order history/details, with seller access limited to their own orders.
 - `GET /api/seller/orders` — authenticated seller order list.
@@ -79,6 +81,12 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `POST /api/products/:id/pause` and `/resume` — owner/admin listing visibility controls.
 - `DELETE /api/products/:id` — owner/admin soft-removes products referenced by orders; otherwise removes listing and image objects.
 - `GET /api/me/products` — seller's products in all statuses.
+- `GET /api/admin/reports` — admin-only open listing reports.
+- `POST /api/admin/reports/:id/takedown` — admin-only listing removal with a required reason and audit event.
+- `GET /api/admin/listings` and `POST /api/admin/listings/:id/approve` or `/reject` — listing moderation.
+- `POST /api/admin/sellers/:uid/suspend` or `/verify` — seller administration.
+- `GET /api/admin/orders`, `/api/admin/payments`, and `/api/admin/orders.csv` — bounded admin views/export.
+- `POST /api/admin/orders/:id/resolve-dispute` — record an admin dispute resolution.
 
 The legacy music endpoints, catalog synchronization, uploads, playlists, recommendations, and admin-claim flow have been removed.
 
@@ -88,7 +96,7 @@ The legacy music endpoints, catalog synchronization, uploads, playlists, recomme
 npm test
 ```
 
-Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, thumbnail-only public responses, checkout snapshots and seller splits, stock reservation/rollback/expiry, order access/state transitions, PesaPal hosted checkout and notification verification. Tests mock Firebase token verification, payment provider, and external storage/database access.
+Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, thumbnail-only public responses, listing reports and takedowns, checkout snapshots and seller splits, stock reservation/rollback/expiry, order access/state transitions, PesaPal hosted checkout and notification verification. Tests mock Firebase token verification, payment provider, and external storage/database access.
 
 ## Deployment
 

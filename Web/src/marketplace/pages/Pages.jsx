@@ -137,9 +137,13 @@ export function ProductDetail() {
   const { id } = useParams();
   const { t } = useI18n();
   const { add } = useCartContext();
+  const { user } = useAuth();
   const [product, setProduct] = useState(null);
   const [qty, setQty] = useState(1);
   const [error, setError] = useState('');
+  const [reportStatus, setReportStatus] = useState('');
+  const [reportReason, setReportReason] = useState('misleading');
+  const [reportDetails, setReportDetails] = useState('');
   const [added, setAdded] = useState(false);
   useEffect(() => { get(`/products/${encodeURIComponent(id)}`).then(({ product: item }) => setProduct(item)).catch((err) => setError(err.message)); }, [id]);
   if (error) return <main className="page"><ErrorMessage message={error} /></main>;
@@ -155,6 +159,17 @@ export function ProductDetail() {
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
   };
+  const submitReport = async (event) => {
+    event.preventDefault();
+    setError('');
+    try {
+      await post(`/products/${encodeURIComponent(product.id)}/reports`, { reason: reportReason, details: reportDetails });
+      setReportStatus(t('reportSubmitted'));
+      setReportDetails('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   return (
     <main className="page product-detail">
       <div className="product-detail-grid">
@@ -167,6 +182,21 @@ export function ProductDetail() {
           <p>{available} {product.unit} {t('available')}</p>
           {product.ratingCount > 0 && <p className="rating">★ {product.ratingAvg} ({product.ratingCount})</p>}
           <SellerLink uid={product.sellerUid} />
+          {user && user.uid !== product.sellerUid && <details className="report-listing">
+            <summary>{t('reportListing')}</summary>
+            <form className="stack-form" onSubmit={submitReport}>
+              <label>{t('reportReason')}<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}>
+                <option value="unsafe">{t('reportUnsafe')}</option>
+                <option value="misleading">{t('reportMisleading')}</option>
+                <option value="prohibited">{t('reportProhibited')}</option>
+                <option value="other">{t('reportOther')}</option>
+              </select></label>
+              <label>{t('reportDetails')}<textarea maxLength={500} value={reportDetails} onChange={(event) => setReportDetails(event.target.value)} /></label>
+              <button className="button button-secondary">{t('submitReport')}</button>
+              {reportStatus && <p role="status">{reportStatus}</p>}
+            </form>
+          </details>}
+          {!user && <p><Link to="/sign-in">{t('signInToReport')}</Link></p>}
           <div className="buy-controls">
             <QuantityInput value={qty} min={product.minOrder} max={available} onChange={setQty} />
             <button className="button button-primary" onClick={addProduct}>{added ? t('addedToCart') : t('addToCart')}</button>
@@ -514,7 +544,33 @@ export function SellerProfile() {
 
 export function AdminHome() {
   const { t } = useI18n();
-  return <main className="page"><h1>{t('admin')}</h1><div className="dashboard-grid"><Link className="dashboard-tile" to="/admin/listings">{t('adminListings')}</Link><Link className="dashboard-tile" to="/admin/orders">{t('adminOrders')}</Link></div></main>;
+  return <main className="page"><h1>{t('admin')}</h1><div className="dashboard-grid"><Link className="dashboard-tile" to="/admin/listings">{t('adminListings')}</Link><Link className="dashboard-tile" to="/admin/reports">{t('listingReports')}</Link><Link className="dashboard-tile" to="/admin/orders">{t('adminOrders')}</Link></div></main>;
+}
+
+export function AdminReports() {
+  const { t } = useI18n();
+  const [reports, setReports] = useState([]);
+  const [reasons, setReasons] = useState({});
+  const [error, setError] = useState('');
+  const load = () => get('/admin/reports').then((result) => setReports(result.reports)).catch((err) => setError(err.message));
+  useEffect(() => { load(); }, []);
+  const takeDown = async (report) => {
+    try {
+      await post(`/admin/reports/${encodeURIComponent(report.id)}/takedown`, { reason: reasons[report.id] || '' });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  return <main className="page"><h1>{t('listingReports')}</h1><ErrorMessage message={error} />
+    {reports.map((report) => <article className="order-card" key={report.id}>
+      <p><Link to={`/products/${encodeURIComponent(report.productId)}`}>{report.productId}</Link> · {t(`report_${report.reason}`)}</p>
+      {report.details && <p>{report.details}</p>}
+      <label>{t('takedownReason')}<input value={reasons[report.id] || ''} maxLength={300} onChange={(event) => setReasons((current) => ({ ...current, [report.id]: event.target.value }))} /></label>
+      <button className="button button-secondary" disabled={!(reasons[report.id] || '').trim()} onClick={() => takeDown(report)}>{t('takeDownListing')}</button>
+    </article>)}
+    {!reports.length && !error && <EmptyState title={t('noListingReports')} />}
+  </main>;
 }
 
 export function AdminListings() {

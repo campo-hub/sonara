@@ -6,6 +6,7 @@ import {
   validateOrder,
   validatePayment,
   validateProduct,
+  validateProductReport,
   validateReview,
   validateAuditLog,
   validateUser
@@ -136,6 +137,17 @@ test('payment and review validators enforce provider, KES, status, uniqueness fi
   assert.equal(validateReview(review), '');
   assert.match(validateReview({ ...review, rating: 6 }), /rating/);
   assert.match(validateReview({ ...review, comment: 'x'.repeat(501) }), /comment/);
+  const report = {
+    id: '061520b1-e4cb-43e5-b2e1-fba70d68af89',
+    productId,
+    reporterUid: 'buyer-1',
+    reason: 'misleading',
+    details: 'The listing description is inaccurate.',
+    status: 'open',
+    createdAt: now
+  };
+  assert.equal(validateProductReport(report), '');
+  assert.match(validateProductReport({ ...report, reason: 'invalid' }), /report fields/);
   assert.equal(validateAuditLog({
     at: now,
     actorUid: 'admin-1',
@@ -173,6 +185,8 @@ test('ensureIndexes applies stable, repeatable indexes for marketplace collectio
     && entry.key.merchantReference === 1 && entry.options?.unique), true);
   assert.equal(INDEX_DEFINITIONS.some((entry) => entry.collection === 'reviews'
     && entry.key.orderId === 1 && entry.key.productId === 1 && entry.options?.unique), true);
+  assert.equal(INDEX_DEFINITIONS.some((entry) => entry.collection === 'reports'
+    && entry.key.productId === 1 && entry.key.reporterUid === 1 && entry.options?.unique), true);
   await assert.rejects(ensureIndexes(null), /connected database/);
 });
 

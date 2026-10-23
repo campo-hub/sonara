@@ -15,7 +15,7 @@ export function Header() {
         <NavLink to="/cart">{t('cart')} <span className="cart-count">{items.length}</span></NavLink>
         {user && <NavLink to="/orders">{t('orders')}</NavLink>}
         {profile?.roles?.includes('seller') && <NavLink to="/seller">{t('sellerDashboard')}</NavLink>}
-        {user && <NavLink to="/admin">{t('admin')}</NavLink>}
+        {profile?.roles?.includes('admin') && <NavLink to="/admin">{t('admin')}</NavLink>}
       </nav>
       <div className="header-actions">
         <label className="language-picker">

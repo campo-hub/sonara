@@ -15,6 +15,8 @@ Decisions collected before Phase 5 implementation:
 | Hosting | GitHub Pages for the Web frontend and Render for the backend API; target Render Free for initial testing. |
 | Multi-seller checkout | Split a cart into one seller-specific order per seller. |
 | Fractional quantity totals | Round each line total to the nearest whole KES amount. |
+| Listing report policy | Signed-in users can report a public active listing once per account; admins may remove a reported listing with a required reason and audit record. |
+| Seller payouts | Automated seller payouts are not implemented; the operator must document a manual settlement and reconciliation process before live transactions. |
 
 The existing hash-based Web routing is compatible with GitHub Pages static hosting. Revisit hosting and plan selection before production if deployment requirements change.
 
