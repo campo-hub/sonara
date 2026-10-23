@@ -97,3 +97,7 @@ MongoDB and R2 were not configured locally; persistence and object storage were 
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
 MongoDB was not configured locally; browse database queries are covered through the memory-store implementation. Verify live MongoDB text and geospatial queries after deployment to a configured test database.
+
+## Phase 5 — Checkout and orders
+
+**Not started.** Product decisions are recorded in [`DECISIONS.md`](./DECISIONS.md); begin implementation only after the user asks to continue.
