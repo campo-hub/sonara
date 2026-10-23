@@ -31,6 +31,19 @@ export async function getUserRoles(uid) {
   return Array.isArray(profile?.roles) ? profile.roles : ['buyer'];
 }
 
+export async function getPublicSellerProfile(uid) {
+  const profile = await getUserProfile(uid);
+  if (!profile || !profile.roles?.includes('seller') || !profile.sellerProfile) return null;
+  return {
+    uid: profile.uid,
+    displayName: profile.sellerProfile.displayName,
+    bio: profile.sellerProfile.bio,
+    county: profile.sellerProfile.county,
+    town: profile.sellerProfile.town,
+    verified: profile.sellerProfile.verified === true
+  };
+}
+
 export async function saveUserProfile({ uid, email, username }) {
   const usernameValue = String(username || '').trim();
   const usernameLower = normalizeUsername(usernameValue);

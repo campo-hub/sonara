@@ -81,4 +81,19 @@ MongoDB was not configured locally; index declarations were verified using a moc
 
 MongoDB and R2 were not configured locally; persistence and object storage were tested with injected mocks. Live marketplace deployment remains unverified.
 
-Phase 4 has not started.
+## Phase 4 — Browse, search, and seller pages
+
+| Item | Status | Verification |
+|---|---|---|
+| Public categories and searchable product browse | DONE | HTTP tests cover supported categories, query filters, and active/in-stock visibility |
+| County and whole-shilling KES price filters | DONE | Browse tests cover combined filters, invalid categories/prices, and min/max validation |
+| Sort by newest, price, nearest, and top rated | DONE | Memory-store tests verify deterministic ordering and radius filtering |
+| Cursor pagination | DONE | Tests verify matching-filter enforcement and stable pages after newer listings are inserted |
+| Nearest search with optional radius | DONE | Tests cover distance ordering and radius exclusion |
+| Thumbnail-only browse and seller listing responses | DONE | HTTP and mapping tests confirm full image URLs/object keys are not exposed |
+| Public seller profile and active listings | DONE | HTTP tests verify profile/listing response and private profile-field exclusion |
+| Cache behavior for anonymous and authenticated requests | DONE | HTTP tests confirm short public cache and `private, no-store` for signed-in users |
+| Backend tests | DONE | `npm --prefix backend test` — 31 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+
+MongoDB was not configured locally; browse database queries are covered through the memory-store implementation. Verify live MongoDB text and geospatial queries after deployment to a configured test database.

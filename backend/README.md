@@ -54,6 +54,9 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `GET /api/auth/me` — returns the authenticated Firebase user's verified token claims.
 - `GET /api/me/profile` — returns the signed-in user's profile.
 - `PUT /api/me/profile` — creates or updates the signed-in user's username.
+- `GET /api/categories` — returns supported marketplace product categories.
+- `GET /api/products` — public searchable product browse with category, county, KES price, location/radius, sort, and cursor pagination filters; returns thumbnails only.
+- `GET /api/sellers/:uid` — public seller profile and active, available listings; private account fields are not returned.
 - `POST /api/products` — seller-only multipart listing creation with up to five processed images.
 - `GET /api/products/:id` — public active product detail; non-active listings are private to owner/admin.
 - `PATCH /api/products/:id` — owner/admin listing edits and image removal/reordering/addition.
@@ -69,7 +72,7 @@ The legacy music endpoints, catalog synchronization, uploads, playlists, recomme
 npm test
 ```
 
-Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, and health/auth routing. Tests mock Firebase token verification and make no network calls to external services.
+Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, and thumbnail-only public responses. Tests mock Firebase token verification and external storage/database access.
 
 ## Deployment
 

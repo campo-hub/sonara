@@ -20,13 +20,22 @@ import {
   parseProductFields
 } from './validation.js';
 import {
+  browseProducts,
   deleteProductRecord,
   getProductById,
   insertProduct,
+  listActiveProductsForSeller,
   listProductsForSeller,
   productHasOrders,
   updateProduct
 } from './store.js';
+import { getPublicSellerProfile } from '../../userStore.js';
+import { PRODUCT_CATEGORIES } from '../../models/marketplace.js';
+import {
+  encodeBrowseCursor,
+  parseBrowseQuery,
+  toBrowseProduct
+} from './browse.js';
 
 const FIELDS_ALLOWED = new Set([
   'title', 'description', 'category', 'unit', 'pricePerUnit', 'minOrder',
@@ -116,17 +125,50 @@ export function createProductRouter({
     listProductsForSeller,
     updateProduct,
     productHasOrders,
-    deleteProductRecord
+    deleteProductRecord,
+    browseProducts,
+    listActiveProductsForSeller
   },
   storage = { putObject, deleteObject, publicUrlFor },
   authMiddleware = requireAuth,
   optionalAuthMiddleware = optionalAuth,
   requireSellerMiddleware = requireRole('seller'),
   isAdmin = defaultIsAdmin,
+  getSellerProfile = getPublicSellerProfile,
+  browse = store.browseProducts || browseProducts,
+  listActiveForSeller = store.listActiveProductsForSeller || listActiveProductsForSeller,
   moderateListings = config.moderateListings,
   rateLimiter = createUserRateLimiter()
 } = {}) {
   const router = Router();
+
+  router.get('/categories', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    res.json({ categories: PRODUCT_CATEGORIES });
+  });
+
+  router.get('/products', optionalAuthMiddleware, asyncRoute(async (req, res) => {
+    const options = parseBrowseQuery(req.query);
+    const result = await browse(options);
+    const products = result.items.map(toBrowseProduct);
+    const nextCursor = result.hasMore && result.items.length
+      ? encodeBrowseCursor(result.items[result.items.length - 1], options.sort, options.fingerprint)
+      : null;
+    res.set('Cache-Control', req.user
+      ? 'private, no-store'
+      : 'public, max-age=15, stale-while-revalidate=30');
+    res.json({ products, nextCursor, hasMore: result.hasMore });
+  }));
+
+  router.get('/sellers/:uid', optionalAuthMiddleware, asyncRoute(async (req, res) => {
+    const seller = await getSellerProfile(req.params.uid);
+    if (!seller) throw new HttpError(404, 'Seller not found.', 'SELLER_NOT_FOUND');
+    const listings = await listActiveForSeller(req.params.uid);
+    res.set('Cache-Control', req.user
+      ? 'private, no-store'
+      : 'public, max-age=15, stale-while-revalidate=30');
+    res.json({ seller, products: listings.map(toBrowseProduct) });
+  }));
 
   router.post(
     '/products',
