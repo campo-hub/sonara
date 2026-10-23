@@ -1,6 +1,6 @@
 # AgriStore Backend
 
-The Express API is being rebuilt as the backend foundation for AgriStore, an agricultural marketplace for Kenya. Phase 1 provides the health endpoint, Firebase token authentication, user profile storage, role checks, and shared security/database infrastructure. Product, order, and payment APIs are added in later phases.
+The Express API provides the backend for AgriStore, an agricultural marketplace for Kenya. It includes Firebase authentication, marketplace product and order APIs, and hosted checkout through PesaPal.
 
 ## Architecture
 
@@ -36,8 +36,15 @@ Copy `.env.example` to `.env` for local setup and provide values locally; never 
 | `R2_SECRET_ACCESS_KEY` | R2 secret access key |
 | `R2_BUCKET_NAME` | R2 bucket name |
 | `R2_PUBLIC_BASE_URL` | Public base URL used when forming object URLs |
+| `PESAPAL_ENVIRONMENT` | Provider API environment: `sandbox` by default, `live` for production |
+| `PESAPAL_CONSUMER_KEY` | PesaPal API consumer key |
+| `PESAPAL_CONSUMER_SECRET` | PesaPal API consumer secret |
+| `PESAPAL_CALLBACK_URL` | HTTPS frontend URL where PesaPal returns the buyer |
+| `PESAPAL_IPN_URL` | Public HTTPS backend URL ending in `/api/payments/pesapal/ipn` |
+| `PESAPAL_IPN_ID` | PesaPal notification ID registered for `PESAPAL_IPN_URL` |
 
 Firebase and R2 credentials are backend-only. Do not use `VITE_*` names for them.
+Payment secrets are backend-only as well. Leave payment variables blank to keep online payments disabled. Register the notification URL once with `node scripts/register-pesapal-ipn.js`, then copy the printed `PESAPAL_IPN_ID` into the backend secret environment. Production requires the live provider environment and HTTPS callback/IPN URLs.
 
 ## Run locally
 
@@ -60,9 +67,12 @@ The API listens on `http://localhost:4000` by default. `http://localhost:5173` i
 - `POST /api/orders` — authenticated checkout; server-priced cart quantities are reserved for 15 minutes and split into separate orders per seller.
 - `GET /api/orders` and `GET /api/orders/:id` — private buyer order history/details, with seller access limited to their own orders.
 - `GET /api/seller/orders` — authenticated seller order list.
-- `POST /api/orders/:id/cancel` — buyer cancellation before seller confirmation; releases reserved stock.
+- `POST /api/orders/:id/cancel` — buyer cancellation before seller confirmation; releases reserved stock and flags paid cancellations for manual refund review.
 - `POST /api/orders/:id/confirm`, `/dispatch`, and `/deliver` — seller-owned order lifecycle actions; confirmation requires payment.
 - `POST /api/orders/:id/complete` — buyer confirms delivery and commits reserved stock.
+- `POST /api/orders/:id/payment` — buyer starts or resumes PesaPal hosted checkout for their pending order.
+- `GET /api/orders/:id/payment` — buyer reads their latest payment status.
+- `GET /api/payments/pesapal/ipn` — public provider notification endpoint; the API queries PesaPal before applying payment status.
 - `POST /api/products` — seller-only multipart listing creation with up to five processed images.
 - `GET /api/products/:id` — public active product detail; non-active listings are private to owner/admin.
 - `PATCH /api/products/:id` — owner/admin listing edits and image removal/reordering/addition.
@@ -78,8 +88,8 @@ The legacy music endpoints, catalog synchronization, uploads, playlists, recomme
 npm test
 ```
 
-Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, thumbnail-only public responses, checkout snapshots and seller splits, stock reservation/rollback/expiry, and order access/state transitions. Tests mock Firebase token verification and external storage/database access.
+Tests cover authentication and role checks, production runtime validation, rate limiting, safe error responses, CORS rejection, JSON size limits, health/auth routing, seller product management, browse filters and pagination, seller profile privacy, thumbnail-only public responses, checkout snapshots and seller splits, stock reservation/rollback/expiry, order access/state transitions, PesaPal hosted checkout and notification verification. Tests mock Firebase token verification, payment provider, and external storage/database access.
 
 ## Deployment
 
-Configure the environment variables in the hosting provider, set `NODE_ENV=production`, and provide `MONGODB_URI`. The service fails startup if production MongoDB configuration is missing or database initialization fails. Configure `CORS_ORIGIN` with exact frontend origins. Keep all credentials in the provider's secret store.
+Configure the environment variables in the hosting provider, set `NODE_ENV=production`, and provide `MONGODB_URI`. The service fails startup if production MongoDB configuration is missing or database initialization fails. Configure `CORS_ORIGIN` with exact frontend origins. Keep all credentials in the provider's secret store. See the [PesaPal API 3.0 reference](https://developer.pesapal.com/how-to-integrate/e-commerce/api-30-json/api-reference) for provider setup details.

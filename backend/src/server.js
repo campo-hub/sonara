@@ -39,7 +39,7 @@ if (entrypoint) {
     }
   } catch (error) {
     const message = String(error?.message || '');
-    const knownConfigurationError = /^(MONGODB_URI is required|PORT must be|Every CORS_ORIGIN|CORS_ORIGIN entries)/.test(message);
+    const knownConfigurationError = /^(MONGODB_URI is required|PORT must be|Every CORS_ORIGIN|CORS_ORIGIN entries|PESAPAL_)/.test(message);
     console.error(knownConfigurationError
       ? message
       : 'Backend startup failed while connecting to MongoDB. Check database availability and credentials.');

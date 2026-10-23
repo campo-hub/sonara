@@ -18,6 +18,7 @@ export const INDEX_DEFINITIONS = Object.freeze([
   { collection: 'orders', key: { 'items.sellerUid': 1, createdAt: -1 } },
   { collection: 'orders', key: { status: 1, reservationExpiresAt: 1 } },
   { collection: 'payments', key: { id: 1 }, options: { unique: true } },
+  { collection: 'payments', key: { merchantReference: 1 }, options: { unique: true } },
   { collection: 'payments', key: { orderTrackingId: 1 }, options: { unique: true, sparse: true } },
   { collection: 'payments', key: { orderId: 1, createdAt: -1 } },
   { collection: 'reviews', key: { orderId: 1, productId: 1 }, options: { unique: true } },

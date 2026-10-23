@@ -112,4 +112,18 @@ MongoDB was not configured locally; browse database queries are covered through 
 | Backend tests | DONE | `npm --prefix backend test` — 36 passed, 0 failed |
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-Product-level delivery negotiation is outside platform checkout; the order records delivery details and the platform does not add or collect a delivery fee. Payment-provider initiation and callbacks remain for a later phase. MongoDB was unavailable locally; database persistence and stock concurrency still require configured-database verification. Product decisions and additional checkout choices are recorded in [`DECISIONS.md`](./DECISIONS.md).
+Product-level delivery negotiation is outside platform checkout; the order records delivery details and the platform does not add or collect a delivery fee. MongoDB was unavailable locally; database persistence and stock concurrency still require configured-database verification. Product decisions and additional checkout choices are recorded in [`DECISIONS.md`](./DECISIONS.md).
+
+## Phase 6 — PesaPal hosted payments
+
+| Item | Status | Verification |
+|---|---|---|
+| Configurable sandbox/live PesaPal API client and OAuth token caching | DONE | Provider-client tests cover sandbox host, authentication, and request payloads |
+| One-time IPN registration helper and required backend-only configuration | DONE | Mock provider registration test; runtime config rejects incomplete or insecure settings |
+| Buyer-owned payment start/resume with an order-scoped in-flight lock | DONE | HTTP/service tests cover reuse, ownership, email validation, and reservation expiry |
+| Verify provider IPN by querying transaction status; match merchant reference, amount, and KES currency | DONE | Tests confirm verified success advances order; mismatched notification is rejected |
+| Payment state persistence, retries, and duplicate-notification behavior | DONE | Mock store tests cover lifecycle; duplicate status behavior remains idempotent at order transition |
+| Backend tests | DONE | `npm --prefix backend test` — 48 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+
+Payments remain disabled until provider settings are configured. Live PesaPal credentials, network callbacks, and MongoDB persistence are not available in this environment; validate in provider sandbox before enabling live transactions. A successful payment arriving after cancellation/expiry is marked for order review rather than silently restoring an expired stock reservation. Cancelling an already-paid order flags it for manual refund review; automatic refunds are not implemented.

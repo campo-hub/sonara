@@ -115,6 +115,29 @@ test('runtime configuration rejects production without MongoDB and invalid CORS 
   assert.throws(() => assertRuntimeConfig(base), /MONGODB_URI is required/);
   assert.throws(() => assertRuntimeConfig({ ...base, mongoUri: 'mongodb://db', corsOrigins: new Set(['*']) }), /exact origins/);
   assert.doesNotThrow(() => assertRuntimeConfig({ ...base, mongoUri: 'mongodb://db' }));
+  const pesapal = {
+    environment: 'sandbox',
+    consumerKey: 'key',
+    consumerSecret: 'secret',
+    callbackUrl: 'https://web.example.test/payment',
+    ipnUrl: 'https://api.example.test/api/payments/pesapal/ipn',
+    ipnId: 'registered-ipn'
+  };
+  assert.throws(() => assertRuntimeConfig({
+    ...base,
+    mongoUri: 'mongodb://db',
+    pesapal
+  }), /must be live when NODE_ENV=production/);
+  assert.throws(() => assertRuntimeConfig({
+    ...base,
+    mongoUri: 'mongodb://db',
+    pesapal: { ...pesapal, environment: 'live', ipnId: '' }
+  }), /PESAPAL_IPN_ID must be configured/);
+  assert.throws(() => assertRuntimeConfig({
+    ...base,
+    mongoUri: 'mongodb://db',
+    pesapal: { ...pesapal, callbackUrl: 'http://localhost/payment' }
+  }), /absolute HTTPS URLs/);
 });
 
 test('user profiles normalize email, default to buyer, and enforce username uniqueness', async () => {

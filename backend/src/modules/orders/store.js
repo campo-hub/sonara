@@ -64,18 +64,57 @@ export async function listOrdersForSeller(sellerUid, { limit = 50 } = {}) {
     .sort({ createdAt: -1, id: -1 }).limit(limit).toArray();
 }
 
-export async function updateOrder(id, expectedStatus, update) {
+export async function updateOrder(id, expectedStatus, update, { requireNoPaymentAttempt = false } = {}) {
   const collection = await getOrdersCollection();
   if (!collection) {
     const current = memoryOrders.get(id);
-    if (!current || current.status !== expectedStatus) return null;
+    if (!current || current.status !== expectedStatus
+      || (requireNoPaymentAttempt && current.paymentAttemptId)) return null;
     const saved = { ...current, ...update };
     memoryOrders.set(id, saved);
     return saved;
   }
   const result = await collection.findOneAndUpdate(
-    { id, status: expectedStatus },
+    {
+      id,
+      status: expectedStatus,
+      ...(requireNoPaymentAttempt ? { paymentAttemptId: { $exists: false } } : {})
+    },
     { $set: update },
+    { returnDocument: 'after', projection: { _id: 0 } }
+  );
+  return result || null;
+}
+
+export async function claimPaymentAttempt(id, paymentId) {
+  const collection = await getOrdersCollection();
+  if (!collection) {
+    const current = memoryOrders.get(id);
+    if (!current || current.status !== 'pending_payment' || current.paymentAttemptId) return null;
+    const saved = { ...current, paymentAttemptId: paymentId };
+    memoryOrders.set(id, saved);
+    return saved;
+  }
+  const result = await collection.findOneAndUpdate(
+    { id, status: 'pending_payment', paymentAttemptId: { $exists: false } },
+    { $set: { paymentAttemptId: paymentId } },
+    { returnDocument: 'after', projection: { _id: 0 } }
+  );
+  return result || null;
+}
+
+export async function clearPaymentAttempt(id, paymentId) {
+  const collection = await getOrdersCollection();
+  if (!collection) {
+    const current = memoryOrders.get(id);
+    if (!current || current.paymentAttemptId !== paymentId) return null;
+    const { paymentAttemptId: _paymentAttemptId, ...saved } = current;
+    memoryOrders.set(id, saved);
+    return saved;
+  }
+  const result = await collection.findOneAndUpdate(
+    { id, paymentAttemptId: paymentId },
+    { $unset: { paymentAttemptId: '' } },
     { returnDocument: 'after', projection: { _id: 0 } }
   );
   return result || null;

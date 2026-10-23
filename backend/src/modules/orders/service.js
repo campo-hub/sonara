@@ -9,6 +9,7 @@ import {
 } from '../products/store.js';
 import {
   deleteOrder,
+  getOrderById,
   insertOrder,
   listExpiredPendingOrders,
   updateOrder
@@ -65,7 +66,7 @@ async function releaseOrderReservations(order, productStore) {
 
 export function createOrderService({
   productStore = { getProductById, reserveProductQuantity, releaseProductQuantity, consumeProductReservation },
-  orderStore = { insertOrder, deleteOrder, updateOrder, listExpiredPendingOrders }
+  orderStore = { insertOrder, deleteOrder, updateOrder, listExpiredPendingOrders, getOrderById }
 } = {}) {
   async function expireReservations(now = new Date()) {
     const expired = await orderStore.listExpiredPendingOrders(now);
@@ -159,10 +160,17 @@ export function createOrderService({
     const updated = await orderStore.updateOrder(order.id, order.status, {
       status: 'cancelled',
       cancellationReason: reason,
+      ...(order.status === 'paid' ? { refundReviewRequired: true } : {}),
       updatedAt: now,
       statusHistory: [...order.statusHistory, { status: 'cancelled', at: now, by: actorUid }]
-    });
-    if (!updated) throw new HttpError(409, 'The order changed; refresh and try again.', 'ORDER_STATE_CHANGED');
+    }, { requireNoPaymentAttempt: true });
+    if (!updated) {
+      const latest = await orderStore.getOrderById(order.id);
+      if (latest?.paymentAttemptId) {
+        throw new HttpError(409, 'A payment attempt is being processed; check payment status before cancelling.', 'PAYMENT_IN_PROGRESS');
+      }
+      throw new HttpError(409, 'The order changed; refresh and try again.', 'ORDER_STATE_CHANGED');
+    }
     await releaseOrderReservations(order, productStore);
     return updated;
   }

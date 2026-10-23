@@ -169,6 +169,8 @@ test('ensureIndexes applies stable, repeatable indexes for marketplace collectio
     && entry.key['location.geo'] === '2dsphere'), true);
   assert.equal(INDEX_DEFINITIONS.some((entry) => entry.collection === 'payments'
     && entry.key.orderTrackingId === 1 && entry.options?.unique && entry.options?.sparse), true);
+  assert.equal(INDEX_DEFINITIONS.some((entry) => entry.collection === 'payments'
+    && entry.key.merchantReference === 1 && entry.options?.unique), true);
   assert.equal(INDEX_DEFINITIONS.some((entry) => entry.collection === 'reviews'
     && entry.key.orderId === 1 && entry.key.productId === 1 && entry.options?.unique), true);
   await assert.rejects(ensureIndexes(null), /connected database/);

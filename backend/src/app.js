@@ -10,10 +10,12 @@ import userRoutes from './modules/users/routes.js';
 import { requireAuth } from './middleware/auth.js';
 import { createProductRouter } from './modules/products/routes.js';
 import { createOrderRouter } from './modules/orders/routes.js';
+import { createPaymentRouter } from './modules/payments/routes.js';
 
 export function createApp({
   productRouter = createProductRouter(),
-  orderRouter = createOrderRouter()
+  orderRouter = createOrderRouter(),
+  paymentRouter = createPaymentRouter()
 } = {}) {
   const app = express();
   const disableSharedCaching = (_req, res, next) => {
@@ -46,6 +48,7 @@ export function createApp({
   app.use('/api/me', userRoutes);
   app.use('/api', productRouter);
   app.use('/api', orderRouter);
+  app.use('/api', paymentRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

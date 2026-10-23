@@ -22,6 +22,14 @@ export const config = Object.freeze({
   }),
   adminEmails: new Set(splitList(env.ADMIN_EMAILS).map((email) => email.toLowerCase())),
   moderateListings: env.MODERATE_LISTINGS === 'true',
+  pesapal: Object.freeze({
+    environment: env.PESAPAL_ENVIRONMENT || 'sandbox',
+    consumerKey: env.PESAPAL_CONSUMER_KEY || '',
+    consumerSecret: env.PESAPAL_CONSUMER_SECRET || '',
+    callbackUrl: env.PESAPAL_CALLBACK_URL || '',
+    ipnUrl: env.PESAPAL_IPN_URL || '',
+    ipnId: env.PESAPAL_IPN_ID || ''
+  }),
   corsOrigins: new Set([
     ...splitList(env.CORS_ORIGIN),
     ...(!isProduction ? ['http://localhost:5173'] : [])
@@ -54,6 +62,37 @@ export function assertRuntimeConfig(runtimeConfig = config) {
     }
     if (parsed.origin !== origin || parsed.pathname !== '/') {
       throw new Error('CORS_ORIGIN entries must be exact origins, not wildcards or URLs with paths.');
+    }
+  }
+  const pesapal = runtimeConfig.pesapal || { environment: 'sandbox' };
+  const paymentValues = [
+    pesapal.consumerKey,
+    pesapal.consumerSecret,
+    pesapal.callbackUrl,
+    pesapal.ipnUrl,
+    pesapal.ipnId
+  ];
+  const hasPesapalCredentials = paymentValues.some(Boolean);
+  if (pesapal.environment !== 'sandbox' && pesapal.environment !== 'live') {
+    throw new Error('PESAPAL_ENVIRONMENT must be sandbox or live.');
+  }
+  if (hasPesapalCredentials) {
+    if (!pesapal.consumerKey || !pesapal.consumerSecret || !pesapal.callbackUrl || !pesapal.ipnUrl || !pesapal.ipnId) {
+      throw new Error('PESAPAL_CONSUMER_KEY, PESAPAL_CONSUMER_SECRET, PESAPAL_CALLBACK_URL, PESAPAL_IPN_URL, and PESAPAL_IPN_ID must be configured together.');
+    }
+    for (const url of [pesapal.callbackUrl, pesapal.ipnUrl]) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new Error('PESAPAL_CALLBACK_URL and PESAPAL_IPN_URL must be absolute HTTPS URLs.');
+      }
+      if (parsed.protocol !== 'https:') {
+        throw new Error('PESAPAL_CALLBACK_URL and PESAPAL_IPN_URL must be absolute HTTPS URLs.');
+      }
+    }
+    if (runtimeConfig.isProduction && pesapal.environment !== 'live') {
+      throw new Error('PESAPAL_ENVIRONMENT must be live when NODE_ENV=production and Pesapal is configured.');
     }
   }
 }
