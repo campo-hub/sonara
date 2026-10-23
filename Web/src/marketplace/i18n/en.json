@@ -1,0 +1,140 @@
+{
+  "brand": "AgriStore",
+  "home": "Home",
+  "browse": "Browse produce",
+  "cart": "Cart",
+  "orders": "My orders",
+  "account": "Account",
+  "signIn": "Sign in",
+  "signOut": "Sign out",
+  "search": "Search produce",
+  "searchPlaceholder": "Try tomatoes, maize, avocados…",
+  "category": "Category",
+  "county": "County",
+  "minPrice": "Min price (KES)",
+  "maxPrice": "Max price (KES)",
+  "sort": "Sort by",
+  "newest": "Newest",
+  "priceAsc": "Price: low to high",
+  "priceDesc": "Price: high to low",
+  "topRated": "Top rated",
+  "nearest": "Nearest",
+  "allCategories": "All categories",
+  "allCounties": "All counties",
+  "addToCart": "Add to cart",
+  "addedToCart": "Added to cart",
+  "quantity": "Quantity",
+  "available": "available",
+  "per": "per",
+  "loading": "Loading…",
+  "loadMore": "Load more",
+  "emptyProducts": "No products match these filters.",
+  "tryAgain": "Try again",
+  "error": "Something went wrong.",
+  "serverSleeping": "The marketplace API is unavailable or waking up. Please try again shortly.",
+  "checkout": "Checkout",
+  "continueShopping": "Continue shopping",
+  "remove": "Remove",
+  "pickup": "Pickup",
+  "sellerDelivery": "Seller delivery",
+  "town": "Town",
+  "phone": "Phone number",
+  "deliveryNotes": "Delivery notes",
+  "placeOrder": "Place order",
+  "orderSummary": "Order summary",
+  "pay": "Pay with M-Pesa / card",
+  "paymentConfirming": "Confirming your payment with the server…",
+  "paymentPaid": "Payment confirmed by the server.",
+  "paymentPending": "Payment has not been confirmed yet.",
+  "status": "Status",
+  "product": "Product",
+  "seller": "Seller",
+  "verifiedSeller": "Verified seller",
+  "sellerDashboard": "Seller dashboard",
+  "sellerOrders": "Incoming orders",
+  "myProducts": "My listings",
+  "newProduct": "New listing",
+  "editProduct": "Edit listing",
+  "save": "Save",
+  "title": "Title",
+  "description": "Description",
+  "unit": "Unit",
+  "price": "Price per unit (KES)",
+  "stock": "Available quantity",
+  "minimum": "Minimum order",
+  "photos": "Photos",
+  "countyTown": "County and town",
+  "useLocation": "Use approximate location",
+  "locationPrivacy": "Your location is rounded before it is stored to protect your farm location.",
+  "uploading": "Uploading",
+  "sellerProfile": "Seller profile",
+  "displayName": "Business or farm name",
+  "bio": "About your farm",
+  "createSellerProfile": "Save seller profile",
+  "signInToContinue": "Sign in to continue.",
+  "email": "Email",
+  "password": "Password",
+  "createAccount": "Create account",
+  "googleSignIn": "Continue with Google",
+  "phoneSignIn": "Phone sign-in",
+  "language": "Language",
+  "english": "English",
+  "swahili": "Kiswahili",
+  "admin": "Admin",
+  "adminListings": "Review listings",
+  "adminOrders": "Orders and payments",
+  "approve": "Approve",
+  "reject": "Reject",
+  "exportCsv": "Export orders CSV",
+  "review": "Leave a review",
+  "rating": "Rating",
+  "comment": "Comment",
+  "submitReview": "Submit review",
+  "deliveryMethod": "Delivery method",
+  "notFound": "This page could not be found."
+  ,"tagline": "Kenyan produce, closer to home"
+  ,"heroTitle": "Fresh from farms across Kenya."
+  ,"heroBody": "Discover seasonal produce and connect directly with local sellers."
+  ,"marketplace": "Marketplace"
+  ,"inSeason": "Find what is in season"
+  ,"cartEmpty": "Your cart is empty."
+  ,"eachSellerOrder": "Each seller order is paid separately."
+  ,"finalServerCalculation": "Final totals are calculated by the server."
+  ,"nearMe": "Use my approximate location"
+  ,"validKenyanPhone": "Enter a valid Kenyan mobile number."
+  ,"minimumQuantityError": "Choose at least {min} and no more than {max}."
+  ,"imageRequired": "Add at least one product photo."
+  ,"requiredProductFields": "Complete the required fields with a positive price and quantity."
+  ,"reviewSubmitted": "Review submitted."
+  ,"payments": "Payments"
+  ,"view": "View"
+  ,"confirmOrder": "Confirm order"
+  ,"markDispatched": "Mark dispatched"
+  ,"markDelivered": "Mark delivered"
+  ,"markReceived": "Mark received"
+  ,"orderNumber": "Order"
+  ,"deliveryAddress": "Delivery"
+  ,"sellerProfileSaved": "Seller profile saved."
+  ,"codeSent": "Verification code sent."
+  ,"verificationCode": "Verification code"
+  ,"sendCode": "Send code"
+  ,"verify": "Verify"
+  ,"signInPrompt": "Sign in to continue."
+  ,"locationNotAvailable": "Location is not available in this browser."
+  ,"locationPermission": "Location permission was not granted."
+  ,"returnOrders": "Return to your orders to check payment status."
+  ,"status_pending_payment": "Pending payment"
+  ,"status_paid": "Paid"
+  ,"status_confirmed": "Confirmed"
+  ,"status_dispatched": "Dispatched"
+  ,"status_delivered": "Delivered"
+  ,"status_completed": "Completed"
+  ,"status_cancelled": "Cancelled"
+  ,"status_refunded": "Refunded"
+  ,"status_disputed": "Disputed"
+  ,"status_pending": "Pending review"
+  ,"status_active": "Active"
+  ,"status_paused": "Paused"
+  ,"status_removed": "Removed"
+  ,"status_sold_out": "Sold out"
+}

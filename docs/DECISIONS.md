@@ -17,3 +17,11 @@ Decisions collected before Phase 5 implementation:
 | Fractional quantity totals | Round each line total to the nearest whole KES amount. |
 
 The existing hash-based Web routing is compatible with GitHub Pages static hosting. Revisit hosting and plan selection before production if deployment requirements change.
+
+Frontend rebuild decisions:
+
+| Topic | Decision |
+|---|---|
+| Browser routing on GitHub Pages | Use `BrowserRouter` with a GitHub Pages `404.html` redirect/restore shim. This preserves ordinary path URLs for PesaPal query parameters without changing the selected hosting provider. |
+| Firebase Web configuration in CI | Read the public Firebase web configuration and API base URL from GitHub repository variables; do not retain the legacy Sonara Firebase config in the workflow. |
+| SMS sign-in rollout | Keep the code behind `VITE_ENABLE_PHONE_AUTH`; default it to `false` until SMS cost and rollout are explicitly approved. |

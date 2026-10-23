@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { HttpError } from '../../middleware/errors.js';
-import { requireRole } from '../../middleware/roles.js';
+import { clearRoleCache, requireRole } from '../../middleware/roles.js';
 import { getUserProfile, updateSellerAdminState } from '../../userStore.js';
 import {
   appendAuditLog,
@@ -89,6 +89,7 @@ router.get('/admin/listings', ...protect, asyncRoute(async (req, res) => {
     const seller = await getSeller(req.params.uid);
     if (!seller || !seller.roles?.includes('seller')) throw new HttpError(404, 'Seller not found.', 'SELLER_NOT_FOUND');
     const updated = await changeSeller(req.params.uid, { 'sellerProfile.suspended': true, updatedAt: new Date() });
+    clearRoleCache();
     const hiddenCount = await changeSellerProducts(req.params.uid, 'active', 'paused');
     await audit({ at: new Date(), actorUid: req.user.uid, action: 'seller.suspended', entity: 'user', entityId: req.params.uid, meta: { hiddenListings: hiddenCount } });
     res.set('Cache-Control', 'private, no-store').json({ seller: updated, hiddenListings: hiddenCount });

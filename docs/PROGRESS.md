@@ -1,6 +1,6 @@
 # AgriStore Restoration Progress
 
-Legend: **DONE** means run and observed; **CODE-ONLY** means present but not yet verified.
+Legend: **DONE** means run and observed; **CODE-ONLY** means present but not yet verified; **BLOCKED** means the verification could not be run because a required tool or service was unavailable.
 
 ## Phase 0 — Safety and baseline
 
@@ -142,3 +142,20 @@ Payments remain disabled until provider settings are configured. Live PesaPal cr
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
 Notification delivery currently uses the console driver only. Provider delivery, MongoDB-backed reviews/admin actions, and operational verification require later configuration/testing.
+
+## Phase 8 — Modular marketplace frontend
+
+| Item | Status | Verification |
+|---|---|---|
+| Replace the Web entry point with a modular AgriStore React app while retaining the legacy app until parity is proven | DONE | `Web/src/main.jsx` boots the marketplace modules; the legacy app and its tests remain in the tree |
+| Buyer flows: browse/search/filter, product details, cart, seller profiles, checkout, payment return, orders, and reviews | CODE-ONLY | Routes and API wiring are implemented; live Firebase, MongoDB, and PesaPal flows are not configured |
+| Seller and admin flows, seller onboarding, listing image uploads, order management, and admin views | CODE-ONLY | UI and seller-profile API are implemented; persistence and live role-based flows need configured services |
+| Firebase email/password and Google sign-in; optional SMS behind an explicit build flag | CODE-ONLY | Modular Firebase integration builds; authentication providers cannot be exercised without Firebase configuration |
+| English/Swahili labels, KES formatting, responsive styles, image upload progress, and PWA assets | DONE | Web tests pass; responsive widths 390, 800, 1100, and 1440 were manually checked in the integrated browser with no horizontal overflow |
+| GitHub Pages path routing and runtime configuration | DONE | Production build contains the SPA path restore logic and `/sonara/` asset base; deployment reads Firebase/API settings from repository variables |
+| Backend tests | DONE | `npm --prefix backend test` — 51 passed, 0 failed |
+| Web tests | DONE | `npm --prefix Web test` — 34 passed, 0 failed, including legacy regression coverage |
+| Production frontend build | DONE | `npm --prefix Web run build` completed |
+| Automated Playwright layout screenshots | BLOCKED | `npm --prefix Web run qa:layout` cannot launch because the Playwright Chromium executable is missing; browser download previously timed out |
+
+The responsive browser check is not a substitute for the automated light/dark screenshot matrix. Full buyer/seller/admin parity and live service integration remain unverified; do not remove the retained legacy app/tests until those flows are explicitly compared.

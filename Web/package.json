@@ -1,5 +1,5 @@
 {
-  "name": "sonara-web",
+  "name": "agristore-web",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -14,8 +14,10 @@
   },
   "homepage": "https://campo-hub.github.io/sonara/",
   "dependencies": {
+    "firebase": "^10.14.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.6"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.2",

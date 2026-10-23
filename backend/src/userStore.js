@@ -102,3 +102,42 @@ export async function saveUserProfile({ uid, email, username }) {
   memoryUsers.set(uid, saved);
   return saved;
 }
+
+export async function saveSellerProfile({ uid, email, displayName, bio, county, town }) {
+  const collection = await getUserCollection();
+  const existing = await getUserProfile(uid);
+  if (existing?.sellerProfile?.suspended) {
+    const error = new Error('This seller account is suspended.');
+    error.status = 403;
+    error.code = 'SELLER_SUSPENDED';
+    throw error;
+  }
+  const sellerProfile = {
+    displayName,
+    bio,
+    county,
+    town,
+    verified: existing?.sellerProfile?.verified === true
+  };
+  const updatedAt = new Date();
+  if (collection) {
+    await collection.updateOne(
+      { uid },
+      {
+        $set: { email: String(email || '').trim().toLowerCase(), sellerProfile, updatedAt },
+        $addToSet: { roles: { $each: ['buyer', 'seller'] } },
+        $setOnInsert: { uid, createdAt: updatedAt }
+      },
+      { upsert: true }
+    );
+    return getUserProfile(uid);
+  }
+  const saved = {
+    ...(existing || { uid, email: String(email || '').trim().toLowerCase(), createdAt: updatedAt }),
+    sellerProfile,
+    roles: [...new Set([...(existing?.roles || ['buyer']), 'seller'])],
+    updatedAt
+  };
+  memoryUsers.set(uid, saved);
+  return saved;
+}
