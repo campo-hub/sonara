@@ -1,15 +1,11 @@
-import { getTrackCollection, isMongoConfigured } from './catalogStore.js';
+import { getDb, isMongoConfigured } from './db.js';
 
-const memoryProfiles = new Map();
+const memoryUsers = new Map();
 
 async function getUserCollection() {
   if (!isMongoConfigured()) return null;
-  const tracks = await getTrackCollection();
-  if (!tracks) return null;
-  const collection = tracks.s.db.collection('userProfiles');
-  await collection.createIndex({ uid: 1 }, { unique: true });
-  await collection.createIndex({ usernameLower: 1 }, { unique: true });
-  return collection;
+  const db = await getDb();
+  return db.collection('users');
 }
 
 export function normalizeUsername(value) {
@@ -27,7 +23,12 @@ export function validateUsername(value) {
 export async function getUserProfile(uid) {
   const collection = await getUserCollection();
   if (collection) return collection.findOne({ uid }, { projection: { _id: 0 } });
-  return memoryProfiles.get(uid) || null;
+  return memoryUsers.get(uid) || null;
+}
+
+export async function getUserRoles(uid) {
+  const profile = await getUserProfile(uid);
+  return Array.isArray(profile?.roles) ? profile.roles : ['buyer'];
 }
 
 export async function saveUserProfile({ uid, email, username }) {
@@ -35,28 +36,30 @@ export async function saveUserProfile({ uid, email, username }) {
   const usernameLower = normalizeUsername(usernameValue);
   const profile = {
     uid,
-    email: String(email || '').toLowerCase(),
+    email: String(email || '').trim().toLowerCase(),
     username: usernameValue,
     usernameLower,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date()
   };
   const collection = await getUserCollection();
   if (collection) {
     await collection.updateOne(
       { uid },
-      { $set: profile, $setOnInsert: { createdAt: new Date().toISOString() } },
+      { $set: profile, $setOnInsert: { roles: ['buyer'], createdAt: new Date() } },
       { upsert: true }
     );
-    return profile;
+    return getUserProfile(uid);
   }
 
-  for (const existing of memoryProfiles.values()) {
+  for (const existing of memoryUsers.values()) {
     if (existing.uid !== uid && existing.usernameLower === usernameLower) {
       const error = new Error('That username is already in use.');
       error.code = 11000;
       throw error;
     }
   }
-  memoryProfiles.set(uid, profile);
-  return profile;
+  const existing = memoryUsers.get(uid);
+  const saved = { ...existing, ...profile, roles: existing?.roles || ['buyer'], createdAt: existing?.createdAt || new Date() };
+  memoryUsers.set(uid, saved);
+  return saved;
 }

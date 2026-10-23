@@ -33,6 +33,21 @@ Never put replacement credentials in chat, source files, or example env files.
 
 Three pre-existing modifications in `android/app/src/main/java/com/castmobile/sender/ui/` were present before this task. They are user changes and must remain untouched.
 
-## Next
+## Phase 1 — Backend restructure and hardening
 
-Phase 1 has not started. Report Phase 0 completion and wait before continuing.
+| Item | Status | Verification |
+|---|---|---|
+| Split app construction from server startup | DONE | `server.js` is 36 lines; live process returned `/api/health` |
+| Central config and shared MongoDB helper/index setup | DONE | Startup validation tests pass; indexes created through `ensureIndexes()` |
+| Production MongoDB requirement | DONE | Unit test confirms production config without `MONGODB_URI` is rejected |
+| Firebase auth, seller/admin role middleware, verified-email admin allowlist | DONE | Auth and role middleware tests pass |
+| Security headers, global/strict rate limits, 100 kB JSON limit, safe error handler | DONE | Integration and middleware tests pass |
+| Exact CORS allowlist; local Vite origin only outside production | DONE | Integration test rejects the legacy GitHub Pages origin |
+| User storage uses shared `users` collection, not Mongo driver internals | DONE | Profile and default-buyer tests pass |
+| Remove backend music catalog, upload, recommendation, playlist, library and admin-claim code | DONE | Backend source scan found no music domain identifiers or legacy route symbols |
+| Remove unused audio dependencies | DONE | `npm --prefix backend ls --depth=0` lists no `music-metadata`, `multer`, or `node-cron` |
+| Health response includes status, uptime, DB state and version | DONE | Live check returned `status=degraded`, `db=down`, `version=2.0.0` without local MongoDB |
+| Backend regression/security tests | DONE | `npm --prefix backend test` — 7 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+
+Phase 2 has not started.
