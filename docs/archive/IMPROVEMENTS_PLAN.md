@@ -1,4 +1,4 @@
-# Sonara Functional and UX Improvements Plan
+# Sonara Functional and UX Improvements Plan (Archived)
 
 ## Audit Snapshot
 
