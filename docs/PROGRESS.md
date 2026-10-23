@@ -182,9 +182,10 @@ The report API stores records in MongoDB when configured and uses an in-memory s
 | Production Web build | DONE | `npm run build:web` completed |
 | Responsive smoke check with mocked catalog data | DONE | Integrated browser checked home at 390/800/1100/1440 px in light and dark modes; product detail checked at all four widths. No horizontal overflow or card overlap observed |
 | Playwright automated screenshot/layout job | BLOCKED | Repository `qa:layout` runner still needs the Playwright Chromium binary; prior browser download attempts timed out |
-| Dependency audit and safe fixes | BLOCKED | Web audit: 15 advisories (6 high, 9 moderate) remain after a non-forced fix upgraded `source-map-js` to 1.2.2. Backend production dependency audit: 9 advisories (2 high, 7 moderate). Remaining remediation requires reviewed dependency upgrades; no `--force` changes were applied |
+| Dependency upgrades and audits | DONE | Upgraded Firebase, React Router, Vite, the Vite React plugin, and Firebase Admin; pinned the vulnerable transitive `@grpc/grpc-js` through an npm override. `npm --prefix Web audit` and `npm --prefix backend audit --omit=dev` report 0 vulnerabilities |
+| Regression suites and production build after upgrades | DONE | Backend: 53 passed; Web: 34 passed; `npm --prefix Web run build` completed with Vite 8.3.5 |
 | Firebase/MongoDB/R2/PesaPal sandbox end-to-end and audit persistence | BLOCKED | External service configuration and credentials are unavailable in this environment |
 | Legacy music-code retirement after AgriStore parity | BLOCKED | Full parity has not been demonstrated; old Web app/tests and the frozen Android app remain |
-| Open pull request to `main` | BLOCKED | Not opened: automated layout QA, live service flows, legacy parity, and dependency advisory review are release gates still outstanding |
+| Open pull request to `main` | BLOCKED | Not opened: automated layout QA, live service flows, and legacy parity are release gates still outstanding |
 
-The current local branch contains Phase 8 and Phase 9 commits; the final release handoff is intentionally incomplete. Resolve or formally accept the dependency findings, run the automated and configured-service checks, and verify parity before opening a release PR.
+The current local branch contains Phase 8 and Phase 9 commits plus the reviewed dependency upgrades; the final release handoff is intentionally incomplete. Run the automated and configured-service checks and verify parity before opening a release PR.

@@ -29,7 +29,7 @@ This checklist is not a declaration that the service is production-ready. Mark i
 - [ ] Production Web build and Playwright layout matrix pass with Chromium at 390/800/1100/1440 px and light/dark themes.
 - [ ] Run a real Firebase buyer/seller/admin journey against a configured staging API and database.
 - [ ] Verify seller upload, checkout, multi-seller orders, payment confirmation, delivery completion, review eligibility, report/takedown, CSV export, and audit log.
-- [ ] Review dependency audit findings and explicitly accept or remediate each production-relevant advisory.
+- [ ] Confirm backend and Web npm audits report 0 vulnerabilities on the release commit.
 - [ ] Verify the deployed health endpoint, Pages deep links, monitoring/log access, backup restore, and rollback procedure.
 - [ ] Keep the pull request unmerged until an authorized reviewer approves release.
 
@@ -38,4 +38,4 @@ This checklist is not a declaration that the service is production-ready. Mark i
 - The automated Playwright browser is not installed in the current development environment; Chromium download attempts timed out.
 - Firebase, MongoDB, Cloudflare R2, and PesaPal sandbox services are not configured here.
 - External-service flows and MongoDB-backed persistence therefore remain unverified.
-- The current npm audit reports outstanding high/moderate advisories in backend and Web dependency trees; see `docs/PROGRESS.md`. Do not enable production traffic until they are reviewed and resolved or formally accepted.
+- The latest backend production and Web npm audits report 0 vulnerabilities; rerun both audits on the release commit.
