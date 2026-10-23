@@ -3,6 +3,28 @@ import { config } from './config.js';
 
 let clientPromise;
 
+export const INDEX_DEFINITIONS = Object.freeze([
+  { collection: 'users', key: { uid: 1 }, options: { unique: true } },
+  { collection: 'users', key: { usernameLower: 1 }, options: { unique: true, sparse: true } },
+  { collection: 'products', key: { id: 1 }, options: { unique: true } },
+  { collection: 'products', key: { sellerUid: 1, status: 1 } },
+  { collection: 'products', key: { status: 1, category: 1, createdAt: -1 } },
+  { collection: 'products', key: { 'location.county': 1, status: 1 } },
+  { collection: 'products', key: { 'location.geo': '2dsphere' } },
+  { collection: 'products', key: { title: 'text', description: 'text' } },
+  { collection: 'orders', key: { id: 1 }, options: { unique: true } },
+  { collection: 'orders', key: { merchantReference: 1 }, options: { unique: true } },
+  { collection: 'orders', key: { buyerUid: 1, createdAt: -1 } },
+  { collection: 'orders', key: { 'items.sellerUid': 1, createdAt: -1 } },
+  { collection: 'orders', key: { status: 1, reservationExpiresAt: 1 } },
+  { collection: 'payments', key: { id: 1 }, options: { unique: true } },
+  { collection: 'payments', key: { orderTrackingId: 1 }, options: { unique: true, sparse: true } },
+  { collection: 'payments', key: { orderId: 1, createdAt: -1 } },
+  { collection: 'reviews', key: { orderId: 1, productId: 1 }, options: { unique: true } },
+  { collection: 'auditLog', key: { at: -1 } },
+  { collection: 'auditLog', key: { actorUid: 1, at: -1 } }
+]);
+
 export function isMongoConfigured() {
   return Boolean(config.mongoUri);
 }
@@ -25,23 +47,9 @@ export async function getDb() {
 export async function ensureIndexes(db) {
   if (!db) throw new Error('A connected database is required to create indexes.');
 
-  await Promise.all([
-    db.collection('users').createIndex({ uid: 1 }, { unique: true }),
-    db.collection('users').createIndex({ usernameLower: 1 }, { unique: true, sparse: true }),
-    db.collection('products').createIndex({ id: 1 }, { unique: true }),
-    db.collection('products').createIndex({ sellerUid: 1, status: 1 }),
-    db.collection('products').createIndex({ status: 1, category: 1, createdAt: -1 }),
-    db.collection('products').createIndex({ 'location.county': 1, status: 1 }),
-    db.collection('products').createIndex({ 'location.geo': '2dsphere' }),
-    db.collection('products').createIndex({ title: 'text', description: 'text' }),
-    db.collection('orders').createIndex({ id: 1 }, { unique: true }),
-    db.collection('orders').createIndex({ merchantReference: 1 }, { unique: true }),
-    db.collection('orders').createIndex({ buyerUid: 1, createdAt: -1 }),
-    db.collection('orders').createIndex({ 'items.sellerUid': 1, createdAt: -1 }),
-    db.collection('orders').createIndex({ status: 1, reservationExpiresAt: 1 }),
-    db.collection('payments').createIndex({ orderTrackingId: 1 }, { unique: true, sparse: true }),
-    db.collection('reviews').createIndex({ orderId: 1, productId: 1 }, { unique: true })
-  ]);
+  await Promise.all(INDEX_DEFINITIONS.map(({ collection, key, options }) => (
+    db.collection(collection).createIndex(key, options)
+  )));
 }
 
 export async function closeDb() {

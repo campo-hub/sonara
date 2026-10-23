@@ -50,4 +50,16 @@ Three pre-existing modifications in `android/app/src/main/java/com/castmobile/se
 | Backend regression/security tests | DONE | `npm --prefix backend test` — 7 passed, 0 failed |
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-Phase 2 has not started.
+## Phase 2 — Data model
+
+| Item | Status | Verification |
+|---|---|---|
+| Explicit marketplace validators for users, products, orders, payments, reviews and audit log entries | DONE | Unit tests cover valid documents and invalid enums, fields, amounts, IDs and totals |
+| Required marketplace indexes centralized in `ensureIndexes()` | DONE | Mock DB test checks repeatable index declarations, GeoJSON/text and unique/sparse indexes |
+| UUID ID helper (not filename-derived) | DONE | Unit test checks generated UUID shape; product/order/payment/review validators require UUIDs |
+| Integer-only KES parsing and formatting | DONE | Tests cover grouped KES strings, exact formatting, decimals, malformed values and unsafe integers |
+| Phase 2 backend tests | DONE | `npm --prefix backend test` — 16 passed, 0 failed |
+
+MongoDB was not configured locally; index declarations were verified using a mock database. No rounding rule for fractional quantity × unit price is assumed in this phase; order line totals are validated as whole-shilling integers, with checkout computation to be defined in Phase 5.
+
+Phase 3 has not started.
