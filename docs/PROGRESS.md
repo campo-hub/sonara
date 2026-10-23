@@ -173,3 +173,18 @@ The responsive browser check is not a substitute for the automated light/dark sc
 | Web tests and production build | DONE | `npm --prefix Web test` — 34 passed, 0 failed; `npm --prefix Web run build` completed |
 
 The report API stores records in MongoDB when configured and uses an in-memory store for local tests. MongoDB report persistence and the live administrator workflow remain unverified without a configured database. Seller payout automation, self-service account deletion, and external notification delivery remain out of scope for the current implementation and are called out in the operating/legal docs.
+
+## Phase 10 — Release quality and handoff
+
+| Item | Status | Verification |
+|---|---|---|
+| Backend and Web regression suites | DONE | `npm --prefix backend test` — 53 passed; `npm --prefix Web test` — 34 passed |
+| Production Web build | DONE | `npm run build:web` completed |
+| Responsive smoke check with mocked catalog data | DONE | Integrated browser checked home at 390/800/1100/1440 px in light and dark modes; product detail checked at all four widths. No horizontal overflow or card overlap observed |
+| Playwright automated screenshot/layout job | BLOCKED | Repository `qa:layout` runner still needs the Playwright Chromium binary; prior browser download attempts timed out |
+| Dependency audit and safe fixes | BLOCKED | Web audit: 15 advisories (6 high, 9 moderate) remain after a non-forced fix upgraded `source-map-js` to 1.2.2. Backend production dependency audit: 9 advisories (2 high, 7 moderate). Remaining remediation requires reviewed dependency upgrades; no `--force` changes were applied |
+| Firebase/MongoDB/R2/PesaPal sandbox end-to-end and audit persistence | BLOCKED | External service configuration and credentials are unavailable in this environment |
+| Legacy music-code retirement after AgriStore parity | BLOCKED | Full parity has not been demonstrated; old Web app/tests and the frozen Android app remain |
+| Open pull request to `main` | BLOCKED | Not opened: automated layout QA, live service flows, legacy parity, and dependency advisory review are release gates still outstanding |
+
+The current local branch contains Phase 8 and Phase 9 commits; the final release handoff is intentionally incomplete. Resolve or formally accept the dependency findings, run the automated and configured-service checks, and verify parity before opening a release PR.
