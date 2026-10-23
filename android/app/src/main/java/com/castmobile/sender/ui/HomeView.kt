@@ -481,7 +481,6 @@ private fun OnlineHomeView(
         }
     }
 }
-}
 
 @Composable
 private fun OfflineHomeView(

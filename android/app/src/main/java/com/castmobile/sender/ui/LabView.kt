@@ -42,6 +42,7 @@ private data class AdminStatsData(
     val userBreakdown: List<UserBreakdownItem>
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiquidLab(
     viewModel: MainViewModel,

@@ -13,6 +13,7 @@ export const ORDER_STATUSES = Object.freeze([
   'disputed'
 ]);
 export const PAYMENT_STATUSES = Object.freeze(['created', 'pending', 'completed', 'failed', 'reversed', 'invalid']);
+export const PRODUCT_REPORT_REASONS = Object.freeze(['unsafe', 'misleading', 'prohibited', 'other']);
 export const PRODUCT_CATEGORIES = Object.freeze([
   'cereals',
   'vegetables',

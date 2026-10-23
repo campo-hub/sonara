@@ -47,8 +47,8 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val windowSizeClass = calculateWindowSizeClass(this)
         setContent {
+            val windowSizeClass = calculateWindowSizeClass(this)
             val systemDark = isSystemInDarkTheme()
             val isDark = themeViewModel.isDark(systemDark)
             val bg = if (isDark) SonaraDesign.DarkBg else SonaraDesign.LightBg
