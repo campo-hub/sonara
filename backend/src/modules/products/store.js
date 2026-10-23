@@ -185,6 +185,36 @@ export async function listProductsForSeller(sellerUid) {
   return collection.find({ sellerUid }, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray();
 }
 
+export async function listProductsByStatus(status, limit = 50) {
+  const collection = await getProductsCollection();
+  if (!collection) {
+    return [...memoryProducts.values()]
+      .filter((product) => product.status === status)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, limit);
+  }
+  return collection.find({ status }, { projection: { _id: 0 } })
+    .sort({ createdAt: -1, id: -1 }).limit(limit).toArray();
+}
+
+export async function setSellerProductsStatus(sellerUid, fromStatus, toStatus) {
+  const collection = await getProductsCollection();
+  if (!collection) {
+    let count = 0;
+    for (const [id, product] of memoryProducts) {
+      if (product.sellerUid !== sellerUid || product.status !== fromStatus) continue;
+      memoryProducts.set(id, { ...product, status: toStatus, updatedAt: new Date() });
+      count += 1;
+    }
+    return count;
+  }
+  const result = await collection.updateMany(
+    { sellerUid, status: fromStatus },
+    { $set: { status: toStatus, updatedAt: new Date() } }
+  );
+  return result.modifiedCount;
+}
+
 export async function browseProducts(options) {
   const collection = await getProductsCollection();
   if (!collection) return browseProductsFromMemory([...memoryProducts.values()], options);

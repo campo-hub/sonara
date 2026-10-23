@@ -127,3 +127,18 @@ Product-level delivery negotiation is outside platform checkout; the order recor
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
 Payments remain disabled until provider settings are configured. Live PesaPal credentials, network callbacks, and MongoDB persistence are not available in this environment; validate in provider sandbox before enabling live transactions. A successful payment arriving after cancellation/expiry is marked for order review rather than silently restoring an expired stock reservation. Cancelling an already-paid order flags it for manual refund review; automatic refunds are not implemented.
+
+## Phase 7 — Notifications, reviews, and administration
+
+| Item | Status | Verification |
+|---|---|---|
+| Notification interface with console driver; order placed, seller new-order, paid, confirmed, dispatched, and delivered events | DONE | Backend tests exercise checkout, lifecycle transitions, and verified payment flow; structured console messages include template and order ID |
+| Buyer reviews limited to completed orders containing the product; one review per order/product | DONE | `phase7.test.js` verifies ineligible reviews, successful submission, and duplicate rejection |
+| Product rating average and count updated atomically in MongoDB | CODE-ONLY | MongoDB aggregation-pipeline update implemented; local MongoDB is unavailable |
+| Admin listing review, seller suspension and verification, filtered order/payment lists, dispute resolution, CSV export | CODE-ONLY | Routes and scoped store operations implemented; live Mongo persistence and end-to-end admin verification remain outstanding |
+| Admin write actions recorded in `auditLog` | CODE-ONLY | Audit writes wired to each admin mutation and CSV export; live Mongo persistence unavailable |
+| Seller verification shown on the public seller profile for the frontend badge | DONE | Public seller profile response already exposes `sellerProfile.verified`; frontend wiring follows in Phase 8 |
+| Backend tests | DONE | `npm --prefix backend test` — 50 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+
+Notification delivery currently uses the console driver only. Provider delivery, MongoDB-backed reviews/admin actions, and operational verification require later configuration/testing.

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { notify } from '../../lib/notify.js';
 import { config } from '../../config.js';
 import { HttpError } from '../../middleware/errors.js';
 import { validatePayment } from '../../models/marketplace.js';
@@ -45,6 +46,7 @@ export function createPaymentService({
   orderStore = { getOrderById, updateOrder, claimPaymentAttempt, clearPaymentAttempt },
   reservations = orderService,
   paymentConfig = config.pesapal,
+  notifyFn = notify,
   now = () => new Date()
 } = {}) {
   async function startPayment({ orderId, buyerUid, email, displayName = '', phone }) {
@@ -175,6 +177,12 @@ export function createPaymentService({
           paymentId: payment.id,
           statusHistory: [...order.statusHistory, { status: 'paid', at: timestamp, by: 'pesapal' }]
         });
+        if (paid) {
+          await notifyFn({ to: order.buyerUid, template: 'paid', data: { orderId: order.id } });
+          for (const sellerUid of [...new Set(order.items.map((item) => item.sellerUid).filter(Boolean))]) {
+            await notifyFn({ to: sellerUid, template: 'paid', data: { orderId: order.id } });
+          }
+        }
         if (!paid) {
           const latest = await orderStore.getOrderById(order.id);
           if (latest?.status !== 'paid') throw new HttpError(409, 'Payment was confirmed but the order state needs review.', 'PAYMENT_ORDER_REVIEW');

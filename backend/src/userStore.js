@@ -28,12 +28,14 @@ export async function getUserProfile(uid) {
 
 export async function getUserRoles(uid) {
   const profile = await getUserProfile(uid);
-  return Array.isArray(profile?.roles) ? profile.roles : ['buyer'];
+  const roles = Array.isArray(profile?.roles) ? profile.roles : ['buyer'];
+  return profile?.sellerProfile?.suspended ? roles.filter((role) => role !== 'seller') : roles;
 }
 
 export async function getPublicSellerProfile(uid) {
   const profile = await getUserProfile(uid);
-  if (!profile || !profile.roles?.includes('seller') || !profile.sellerProfile) return null;
+  if (!profile || !profile.roles?.includes('seller')
+    || profile.sellerProfile?.suspended || !profile.sellerProfile) return null;
   return {
     uid: profile.uid,
     displayName: profile.sellerProfile.displayName,
@@ -42,6 +44,30 @@ export async function getPublicSellerProfile(uid) {
     town: profile.sellerProfile.town,
     verified: profile.sellerProfile.verified === true
   };
+}
+
+export async function updateSellerAdminState(uid, fields) {
+  const collection = await getUserCollection();
+  const update = { ...fields };
+  if (collection) {
+    const result = await collection.findOneAndUpdate(
+      { uid, roles: 'seller' },
+      { $set: update },
+      { returnDocument: 'after', projection: { _id: 0 } }
+    );
+    return result || null;
+  }
+  const current = memoryUsers.get(uid);
+  if (!current || !current.roles?.includes('seller')) return null;
+  const saved = structuredClone(current);
+  for (const [path, value] of Object.entries(update)) {
+    const keys = path.split('.');
+    let target = saved;
+    for (const key of keys.slice(0, -1)) target = target[key] ||= {};
+    target[keys[keys.length - 1]] = value;
+  }
+  memoryUsers.set(uid, saved);
+  return saved;
 }
 
 export async function saveUserProfile({ uid, email, username }) {

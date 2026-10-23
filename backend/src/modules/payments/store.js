@@ -56,6 +56,22 @@ export async function getLatestPaymentForOrder(orderId) {
     .sort({ createdAt: -1 }).limit(1).next();
 }
 
+export async function listPaymentsForAdmin({ status, orderId, limit = 50 } = {}) {
+  const collection = await getPaymentsCollection();
+  if (!collection) {
+    return [...memoryPayments.values()]
+      .filter((payment) => (!status || payment.status === status)
+        && (!orderId || payment.orderId === orderId))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, limit);
+  }
+  const query = {};
+  if (status) query.status = status;
+  if (orderId) query.orderId = orderId;
+  return collection.find(query, { projection: { _id: 0 } })
+    .sort({ createdAt: -1, id: -1 }).limit(limit).toArray();
+}
+
 export async function updatePayment(id, update) {
   const collection = await getPaymentsCollection();
   if (!collection) {

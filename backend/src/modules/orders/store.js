@@ -52,6 +52,24 @@ export async function listOrdersForBuyer(buyerUid, { limit = 50 } = {}) {
     .sort({ createdAt: -1, id: -1 }).limit(limit).toArray();
 }
 
+export async function listAllOrdersForAdmin({ status, buyerUid, sellerUid, limit = 50 } = {}) {
+  const collection = await getOrdersCollection();
+  if (!collection) {
+    return [...memoryOrders.values()]
+      .filter((order) => (!status || order.status === status)
+        && (!buyerUid || order.buyerUid === buyerUid)
+        && (!sellerUid || order.items.some((item) => item.sellerUid === sellerUid)))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, limit);
+  }
+  const query = {};
+  if (status) query.status = status;
+  if (buyerUid) query.buyerUid = buyerUid;
+  if (sellerUid) query['items.sellerUid'] = sellerUid;
+  return collection.find(query, { projection: { _id: 0 } })
+    .sort({ createdAt: -1, id: -1 }).limit(limit).toArray();
+}
+
 export async function listOrdersForSeller(sellerUid, { limit = 50 } = {}) {
   const collection = await getOrdersCollection();
   if (!collection) {

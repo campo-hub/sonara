@@ -11,6 +11,7 @@ import {
   updateOrder
 } from './store.js';
 import { parseCheckoutRequest } from './validation.js';
+import { notify } from '../../lib/notify.js';
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -24,7 +25,8 @@ export function createOrderRouter({
   service = orderService,
   store = { getOrderById, listOrdersForBuyer, listOrdersForSeller, updateOrder },
   authMiddleware = requireAuth,
-  requireSellerMiddleware = requireRole('seller')
+  requireSellerMiddleware = requireRole('seller'),
+  notifyFn = notify
 } = {}) {
   const router = Router();
 
@@ -95,6 +97,7 @@ export function createOrderRouter({
         const completed = await service.completeOrder(order, req.user.uid);
         const validationError = validateOrder(completed);
         if (validationError) throw new Error(`Order transition produced invalid data: ${validationError}`);
+        await notifyFn({ to: completed.buyerUid, template: 'order_completed', data: { orderId: completed.id } });
         res.set('Cache-Control', 'private, no-store').json({ order: completed });
         return;
       }
@@ -107,6 +110,7 @@ export function createOrderRouter({
       if (!updated) throw new HttpError(409, 'The order changed; refresh and try again.', 'ORDER_STATE_CHANGED');
       const validationError = validateOrder(updated);
       if (validationError) throw new Error(`Order transition produced invalid data: ${validationError}`);
+      await notifyFn({ to: updated.buyerUid, template: updated.status, data: { orderId: updated.id } });
       res.set('Cache-Control', 'private, no-store').json({ order: updated });
     }));
   }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { HttpError } from '../../middleware/errors.js';
+import { notify } from '../../lib/notify.js';
 import { validateOrder } from '../../models/marketplace.js';
 import {
   getProductById,
@@ -66,7 +67,8 @@ async function releaseOrderReservations(order, productStore) {
 
 export function createOrderService({
   productStore = { getProductById, reserveProductQuantity, releaseProductQuantity, consumeProductReservation },
-  orderStore = { insertOrder, deleteOrder, updateOrder, listExpiredPendingOrders, getOrderById }
+  orderStore = { insertOrder, deleteOrder, updateOrder, listExpiredPendingOrders, getOrderById },
+  notifyFn = notify
 } = {}) {
   async function expireReservations(now = new Date()) {
     const expired = await orderStore.listExpiredPendingOrders(now);
@@ -131,7 +133,6 @@ export function createOrderService({
         await orderStore.insertOrder(order);
         created.push(order);
       }
-      return created;
     } catch (error) {
       const rollbackErrors = [];
       for (const order of created) {
@@ -153,6 +154,14 @@ export function createOrderService({
       }
       throw error;
     }
+    for (const order of created) {
+      const sellerUids = [...new Set(order.items.map((item) => item.sellerUid))];
+      await notifyFn({ to: buyerUid, template: 'order_placed', data: { orderId: order.id } });
+      for (const sellerUid of sellerUids) {
+        await notifyFn({ to: sellerUid, template: 'new_order', data: { orderId: order.id } });
+      }
+    }
+    return created;
   }
 
   async function cancelOrder(order, actorUid, reason = 'buyer_cancelled') {

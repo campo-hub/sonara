@@ -11,11 +11,15 @@ import { requireAuth } from './middleware/auth.js';
 import { createProductRouter } from './modules/products/routes.js';
 import { createOrderRouter } from './modules/orders/routes.js';
 import { createPaymentRouter } from './modules/payments/routes.js';
+import { createReviewRouter } from './modules/reviews/routes.js';
+import { createAdminRouter } from './modules/admin/routes.js';
 
 export function createApp({
   productRouter = createProductRouter(),
   orderRouter = createOrderRouter(),
-  paymentRouter = createPaymentRouter()
+  paymentRouter = createPaymentRouter(),
+  reviewRouter = createReviewRouter(),
+  adminRouter = createAdminRouter()
 } = {}) {
   const app = express();
   const disableSharedCaching = (_req, res, next) => {
@@ -49,6 +53,8 @@ export function createApp({
   app.use('/api', productRouter);
   app.use('/api', orderRouter);
   app.use('/api', paymentRouter);
+  app.use('/api', reviewRouter);
+  app.use('/api', adminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
