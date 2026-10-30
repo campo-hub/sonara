@@ -1,184 +1,206 @@
-# Sonara Progress Tracker
+# AgriStore Restoration Progress
 
-Legend: **DONE** = present in code and verified | **CODE-ONLY** = present in code, not yet run/verified | **PARTIAL** = some of it exists | **NOT DONE** = not found in code | **REVERT** = must be undone | **TODO** = restoration step not started
+Legend: **DONE** means run and observed; **CODE-ONLY** means present but not yet verified; **BLOCKED** means the verification could not be run because a required tool or service was unavailable.
 
-Audit basis: static comparison of `sonara_1.zip` (baseline, last good UI) against `sonara.7z` (current, last commit `b442ea2 "still fighting"` plus uncommitted changes), Oct 5 2026. Nothing was built or run during the audit, so nothing below is marked DONE unless it is a pure file-presence fact. Update this file in every commit.
+## Phase 0 — Safety and baseline
 
----
-
-## A. Restoration steps (from SONARA_RESTORE_PROMPT.md)
-
-| ID | Step | Status | Commit | Verified how |
-|---|---|---|---|---|
-| R-00 | Snapshot branch/tag + baseline screenshots | DONE | restore-kit applied | baseline restore copied from kit and current UI restored to baseline web files |
-| R-01 | Delete dead scaffold `Web/src/app/*`, archive `REDESIGN_PLAN.md` | DONE | restore-kit applied | `Web/src/app` removed and `docs/archive/REDESIGN_PLAN.abandoned.md` created |
-| R-02 | Single `lib/` for routes/cache; tests import `lib/` | PARTIAL | restore-kit baseline | current repo retains the working baseline; the remaining selective ports are not yet reapplied |
-| R-03 | Restore `styles.css` from baseline + A-CSS-1 (cost) + A-CSS-2 (home scroll) | DONE | restore-kit applied | baseline stylesheet copied from kit |
-| R-04 | Restore `App.jsx` from baseline + ports P-01..P-10 | PARTIAL | restore-kit baseline | baseline App restored; selective approved improvements still pending re-port |
-| R-05 | Restore `main.jsx`, `catalogUtils.js`, `colorUtils.js`, `firebaseAuth.js` | DONE | restore-kit applied | baseline helper files restored from kit |
-| R-06 | TV scaling via postcss-pxtorem + root steps + living-room toggle | TODO | | |
-| R-07 | Full-matrix `layout-check.mjs` | PARTIAL | restore-kit baseline | baseline harness copied; full parity matrix not yet run |
-| R-08 | Git hygiene: untrack google-services files, restore `Web/.env.example`, fix `.gitignore` | TODO | | |
-| R-09 | Visual parity gate passes (`qa-output/REPORT.md`) | TODO | | |
-| R-10 | Android build check / minimal baseline restores | TODO | | |
-
-### Ports into the restored `App.jsx`
-
-| ID | Port | Present in current tree? | Status after restore |
-|---|---|---|---|
-| P-01 | queryCache / routes / useAction / ProgressSteps imports + helpers | yes | TODO |
-| P-02 | Hash routing, scroll restore, `all-music` alias | yes | TODO |
-| P-03 | Nav: All Music removed, mobile tabs updated | yes | TODO |
-| P-04 | Discover removed (memo + 2 render sites) | yes | TODO |
-| P-05 | Admin data via cache, "Updated Ns ago" | yes | TODO |
-| P-06 | Admin per-action states, steps, job polling, undo, activity drawer | yes | TODO |
-| P-07 | Cost table (`username (email)`, copy, CSV, sort, totals, mobile cards) | yes | TODO |
-| P-08 | Genre playlists merged into Playlists | yes (state + fetch) | TODO |
-| P-09 | Universal daily recommendations + subtitles | yes | TODO |
-| P-10 | Arrow-key remote navigation at `>=2560px` | yes (width-gated only) | TODO |
-
----
-
-## B. Visual regressions found (current vs baseline)
-
-| ID | Issue | Evidence | Status |
-|---|---|---|---|
-| V-01 | Home collapsed to 1 column (rails stacked) | `.home-grid` columns, `.home-rail` static, tablet rule deleted | REVERT |
-| V-02 | px-to-rem on 8 container widths + `body` font | `styles.css` lines 83-93, 574, 2494, 2609, 2732, 2968, 2995 | REVERT |
-| V-03 | `>=1600px` rem block (grids only; text does not scale) | `styles.css` end of file | REVERT, replace with R-06 |
-| V-04 | Overflow rules changed on `.home-main`, `.home-section` | `hidden` to `visible`/`clip` | REVERT, keep `overflow-x: clip` only |
-
----
-
-## C. Debris to remove
-
-| ID | Item | Status |
+| Item | Status | Verification |
 |---|---|---|
-| D-01 | `Web/src/app/AppShell.jsx`, `AppShell.css`, `design-tokens.css` (unused, placeholder content) | TODO delete |
-| D-02 | `Web/src/app/routes.js`, `queryCache.js` (duplicates of `lib/`) | TODO delete |
-| D-03 | `docs/REDESIGN_PLAN.md` (abandoned direction; conflicts with improvements plan) | TODO archive |
-| D-04 | `android/app/google-services (1).json`, `(2).json` (duplicate copies, tracked) | TODO untrack + delete local dupes |
+| Site name set to AgriStore | DONE | Confirmed with the user |
+| `sonara-music-final` tag and `agri-marketplace` branch | DONE | `git tag --list sonara-music-final`; `git branch --show-current` |
+| Backend baseline | DONE | `npm --prefix backend test` — 45 passed, 0 failed |
+| Web baseline | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+| Ignore rules for env files and Google service config | DONE | Reviewed `.gitignore`; patterns and `.env.example` exception are present |
+| Example env files contain variable names only | DONE | Checked `Web/.env.example` and `backend/.env.example`: assignments are blank |
+| Google service config files removed from Git tracking | DONE | `git ls-files` confirms no tracked `.env` or `google-services*.json` files |
+| Duplicate Google service config files removed locally | DONE | Confirmed both duplicate paths are absent; primary local file remains |
+| Legacy documentation archived | DONE | Improvements plan and old progress moved to `docs/archive/`; abandoned redesign plan was already archived |
+| Android marked as frozen legacy music player | DONE | Added `android/FROZEN.md` |
 
----
+The root package has no `test` script; run the test commands in the backend and Web package directories (or use the `--prefix` commands above).
 
-## D. Improvements ledger (from the "improvements, no redesign" prompt)
+## Manual security action
 
-### 1. Admin: no reload on every visit
-| Item | Status | Evidence / gap |
+The credentials previously present in `backend/.env` must be rotated before deployment:
+
+- Cloudflare dashboard → R2 → Manage R2 API tokens: revoke/rotate the token backing `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
+- Google Cloud Console → IAM & Admin → Service Accounts → Keys (or Firebase Console → Project settings → Service accounts): revoke the exposed key identified by `FIREBASE_PRIVATE_KEY_ID` and issue a replacement for `FIREBASE_PRIVATE_KEY`.
+- MongoDB Atlas → Database Access: change the password for the database user in `MONGODB_URI`, then update the deployment environment.
+
+Never put replacement credentials in chat, source files, or example env files.
+
+## Existing worktree changes
+
+Three pre-existing modifications in `android/app/src/main/java/com/castmobile/sender/ui/` were present before this task. They are user changes and must remain untouched.
+
+## Phase 1 — Backend restructure and hardening
+
+| Item | Status | Verification |
 |---|---|---|
-| In-memory SWR cache with dedupe | CODE-ONLY | `lib/queryCache.js` + `queryCache.test.js` |
-| Admin stats/catalog/batches via cache | CODE-ONLY | `adminCacheKeys`, `fetchQuery` usage in `App.jsx` |
-| Instant return, silent revalidate, "Updated ago" | CODE-ONLY | 1 "Updated ... ago" hit |
-| Admin state kept across navigation | CODE-ONLY | admin state already top-level in baseline |
-| Cache for catalog / playlists / genres / recs | PARTIAL | playlists + genre playlists use cache; verify catalog and recs |
-| `GET /api/admin/summary` | CODE-ONLY | present in `server.js` |
-| ETag/Cache-Control on admin + catalog GETs | CODE-ONLY | ETag mentions 17 to 42 in `backend/src` |
+| Split app construction from server startup | DONE | `server.js` is 36 lines; live process returned `/api/health` |
+| Central config and shared MongoDB helper/index setup | DONE | Startup validation tests pass; indexes created through `ensureIndexes()` |
+| Production MongoDB requirement | DONE | Unit test confirms production config without `MONGODB_URI` is rejected |
+| Firebase auth, seller/admin role middleware, verified-email admin allowlist | DONE | Auth and role middleware tests pass |
+| Security headers, global/strict rate limits, 100 kB JSON limit, safe error handler | DONE | Integration and middleware tests pass |
+| Exact CORS allowlist; local Vite origin only outside production | DONE | Integration test rejects the legacy GitHub Pages origin |
+| User storage uses shared `users` collection, not Mongo driver internals | DONE | Profile and default-buyer tests pass |
+| Remove backend music catalog, upload, recommendation, playlist, library and admin-claim code | DONE | Backend source scan found no music domain identifiers or legacy route symbols |
+| Remove unused audio dependencies | DONE | `npm --prefix backend ls --depth=0` lists no `music-metadata`, `multer`, or `node-cron` |
+| Health response includes status, uptime, DB state and version | DONE | Live check returned `status=degraded`, `db=down`, `version=2.0.0` without local MongoDB |
+| Backend regression/security tests | DONE | `npm --prefix backend test` — 7 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-### 2. Feedback system
-| Item | Status | Evidence / gap |
+## Phase 2 — Data model
+
+| Item | Status | Verification |
 |---|---|---|
-| `useAction` + `ProgressSteps` | CODE-ONLY | `lib/useAction.js`, `lib/ProgressSteps.jsx`, tests |
-| Per-action/per-row busy state (replaces `adminActionLoading`) | CODE-ONLY | `useActionMap` in `App.jsx` |
-| Jobs + progress polling (requeue, import, rollback, backfill) | CODE-ONLY | `backend/src/adminJobs.js`, `pollAdminJob` |
-| Undo (8s) | CODE-ONLY | 8 "Undo" hits |
-| Activity log drawer | CODE-ONLY | `adminActivity` state |
-| Confirmation modal for destructive actions | NOT DONE | no confirm dialog found |
-| Global top progress bar / offline banner | NOT DONE | no new code vs baseline; `navigator.onLine` absent |
-| `aria-live` announcements | PARTIAL | 1 to 2 occurrences |
-| Same pattern for upload, like, playlist, sign-in, profile | NOT DONE | `useActionMap` used for admin only |
+| Explicit marketplace validators for users, products, orders, payments, reviews and audit log entries | DONE | Unit tests cover valid documents and invalid enums, fields, amounts, IDs and totals |
+| Required marketplace indexes centralized in `ensureIndexes()` | DONE | Mock DB test checks repeatable index declarations, GeoJSON/text and unique/sparse indexes |
+| UUID ID helper (not filename-derived) | DONE | Unit test checks generated UUID shape; product/order/payment/review validators require UUIDs |
+| Integer-only KES parsing and formatting | DONE | Tests cover grouped KES strings, exact formatting, decimals, malformed values and unsafe integers |
+| Phase 2 backend tests | DONE | `npm --prefix backend test` — 16 passed, 0 failed |
 
-### 3. Cost table
-| Item | Status | Evidence / gap |
+MongoDB was not configured locally; index declarations were verified using a mock database. Fractional quantity × unit price is rounded to the nearest whole KES per line during Phase 5 checkout.
+
+## Phase 3 — Product API and image upload
+
+| Item | Status | Verification |
 |---|---|---|
-| `username (email)` first column | CODE-ONLY | `adminStatsUtils.js`, cost CSS |
-| Server-side identity resolution (profiles then Firebase Admin) | CODE-ONLY | `identity.displayName` logic in `server.js` |
-| Click-to-copy email, copy all, billing CSV | CODE-ONLY | `copyAllEmails`, billing hits |
-| Sort/search/totals/meters/mobile cards | CODE-ONLY | `.cost-*` CSS |
-| Upload stores profile username/email | CODE-ONLY | `uploaderName` at upload route |
-| Backfill job | CODE-ONLY | `backfill` in server + App |
-| Free-tier footnote, neutral `$0` styling | CODE-ONLY | `.cost-zero`, `.cost-footnote` |
+| Seller product creation and seller-owned product listing routes | DONE | HTTP tests cover 401/403, create response and own listing status |
+| Product detail visibility and owner/admin editing | DONE | HTTP tests confirm active product visibility and non-active owner-only reads |
+| Pause/resume and ownership-protected deletion | DONE | HTTP tests cover status transitions and non-owner edit/delete rejection |
+| Soft-delete products referenced by orders; hard-delete otherwise with R2 cleanup | DONE | Mock store/storage tests cover both branches |
+| Multipart limits: 5 images, 5 MB each, bounded fields/parts | DONE | HTTP tests cover oversize and six-file rejection |
+| JPEG/PNG/WebP magic-byte validation and Sharp WebP processing | DONE | Tests reject SVG bytes with a `.jpg` filename; successful processing asserts WebP output and metadata removal |
+| R2 image pairs, thumbnails, immutable cache headers, upload rollback | DONE | Mock storage tests verify public URLs/cache headers and partial-upload cleanup |
+| Approximate coordinates rounded to two decimals | DONE | Product create test checks the stored GeoJSON point |
+| Upload rate limit keyed by authenticated seller | DONE | Test confirms a seller's second request is limited while another seller has a separate quota |
+| Backend tests | DONE | `npm --prefix backend test` — 24 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
+| Clean backend dependency install | DONE | `npm --prefix backend ci --no-fund --no-audit` completed |
 
-### 4. Navigation cleanup
-| Item | Status |
-|---|---|
-| All Music page removed, merged into Library Songs | CODE-ONLY |
-| Remaining `goTo('all-music')` calls resolve via alias | CODE-ONLY (6 call sites, all handled; tidy later) |
-| Hash routing, back button, scroll restore | CODE-ONLY |
-| Mobile tabs updated | CODE-ONLY |
+MongoDB and R2 were not configured locally; persistence and object storage were tested with injected mocks. Live marketplace deployment remains unverified.
 
-### 5. Home
-| Item | Status | Note |
+## Phase 4 — Browse, search, and seller pages
+
+| Item | Status | Verification |
 |---|---|---|
-| Discover removed (Web) | CODE-ONLY | keep |
-| Discover removed (Android) | CODE-ONLY | keep |
-| One scroll only | REWORK | achieved by collapsing to one column, which broke the layout. Redo as A-CSS-2 (rails static, 3 columns kept) |
+| Public categories and searchable product browse | DONE | HTTP tests cover supported categories, query filters, and active/in-stock visibility |
+| County and whole-shilling KES price filters | DONE | Browse tests cover combined filters, invalid categories/prices, and min/max validation |
+| Sort by newest, price, nearest, and top rated | DONE | Memory-store tests verify deterministic ordering and radius filtering |
+| Cursor pagination | DONE | Tests verify matching-filter enforcement and stable pages after newer listings are inserted |
+| Nearest search with optional radius | DONE | Tests cover distance ordering and radius exclusion |
+| Thumbnail-only browse and seller listing responses | DONE | HTTP and mapping tests confirm full image URLs/object keys are not exposed |
+| Public seller profile and active listings | DONE | HTTP tests verify profile/listing response and private profile-field exclusion |
+| Cache behavior for anonymous and authenticated requests | DONE | HTTP tests confirm short public cache and `private, no-store` for signed-in users |
+| Backend tests | DONE | `npm --prefix backend test` — 31 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-### 6. Recommendations and playlists
-| Item | Status | Evidence / gap |
+MongoDB was not configured locally; browse database queries are covered through the memory-store implementation. Verify live MongoDB text and geospatial queries after deployment to a configured test database.
+
+## Phase 5 — Checkout and orders
+
+| Item | Status | Verification |
 |---|---|---|
-| One universal daily set, once per day | CODE-ONLY | cron `5 0 * * *` (was hourly), `daily_mixes` doc |
-| Stale-while-revalidate serving | CODE-ONLY | verify headers manually |
-| Genre playlists (backend) | CODE-ONLY | `/genres/playlists` |
-| Genre playlists (UI) | PARTIAL | merged into one flat list; no dedicated "Genres" group or `#/playlists/genre/:genre` page UI |
-| Genre-named mixes ("Gospel Mix"), no "Sonara Set" | CODE-ONLY | `recommendationUtils.js` |
-| Deep Cuts mix | PARTIAL | backend only, no UI |
-| New Arrivals mix | NOT DONE | no backend mix found |
-| Artist Mix / Artist Radio | NOT DONE | no backend or UI |
-| Tests updated for determinism/naming | CODE-ONLY | `recommendation-utils`, `genre-mix`, `admin-jobs` tests |
+| Checkout request validation; reject client-supplied prices and unsupported fields | DONE | Order-route tests cover altered price inputs and malformed checkout requests |
+| Server-side product price snapshots and whole-KES line rounding | DONE | Tests check per-line nearest-shilling totals using authoritative product prices |
+| Split a multi-seller cart into individual seller orders | DONE | HTTP test checks separate order records, totals, and delivery details per seller |
+| Stock reservations with rollback when any cart item cannot be reserved | DONE | Service tests verify insufficient-stock rollback leaves no partial hold/order |
+| 15-minute reservation expiry and periodic cleanup | DONE | Tests verify expired orders are cancelled and reserved stock is released |
+| Buyer/seller order history, access control, and cancellation | DONE | HTTP tests cover private order reads, buyer cancellation, and seller ownership |
+| Seller order state transitions and buyer delivery completion | DONE | HTTP tests cover payment prerequisite, seller-only transitions, and stock consumption |
+| Backend tests | DONE | `npm --prefix backend test` — 36 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-### 7. Responsive / TV
-| Item | Status | Note |
+Product-level delivery negotiation is outside platform checkout; the order records delivery details and the platform does not add or collect a delivery fee. MongoDB was unavailable locally; database persistence and stock concurrency still require configured-database verification. Product decisions and additional checkout choices are recorded in [`DECISIONS.md`](./DECISIONS.md).
+
+## Phase 6 — PesaPal hosted payments
+
+| Item | Status | Verification |
 |---|---|---|
-| Fluid scaling | REWORK | V-02/V-03: only containers scale. Replace per R-06 |
-| Wider breakpoints and overscan padding | PARTIAL | rules exist at 1920/2560/3840 but inside the block being replaced |
-| Living-room mode toggle | NOT DONE | only width-gated arrow-key handler |
-| Remote/D-pad navigation | CODE-ONLY | `keydown` handler, only active at `>=2560px` |
-| Mobile audit (targets, safe areas, deck overlap) | NOT DONE | no evidence |
-| Playwright matrix (9 viewports, all views, overflow/scroller checks) | PARTIAL | script extended, not confirmed to cover all views/viewports |
+| Configurable sandbox/live PesaPal API client and OAuth token caching | DONE | Provider-client tests cover sandbox host, authentication, and request payloads |
+| One-time IPN registration helper and required backend-only configuration | DONE | Mock provider registration test; runtime config rejects incomplete or insecure settings |
+| Buyer-owned payment start/resume with an order-scoped in-flight lock | DONE | HTTP/service tests cover reuse, ownership, email validation, and reservation expiry |
+| Verify provider IPN by querying transaction status; match merchant reference, amount, and KES currency | DONE | Tests confirm verified success advances order; mismatched notification is rejected |
+| Payment state persistence, retries, and duplicate-notification behavior | DONE | Mock store tests cover lifecycle; duplicate status behavior remains idempotent at order transition |
+| Backend tests | DONE | `npm --prefix backend test` — 48 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-### 8. Android
-| Item | Status |
-|---|---|
-| Library and All Music merged (`LiquidLibrary` takes add-to-playlist + columns) | CODE-ONLY |
-| WindowSizeClass for library columns | PARTIAL (library only) |
-| Daily mix from `viewModel.dailyRecommendationTracks/Name` | CODE-ONLY |
-| Discover removed from `HomeView` | CODE-ONLY |
-| Feedback snackbars, retry, undo | NOT DONE |
-| Response caching (Room/DataStore) | NOT DONE |
-| Genre playlists / artist radio | NOT DONE |
-| Gradle build passes | UNVERIFIED |
+Payments remain disabled until provider settings are configured. Live PesaPal credentials, network callbacks, and MongoDB persistence are not available in this environment; validate in provider sandbox before enabling live transactions. A successful payment arriving after cancellation/expiry is marked for order review rather than silently restoring an expired stock reservation. Cancelling an already-paid order flags it for manual refund review; automatic refunds are not implemented.
 
-### 9. Engineering
-| Item | Status |
-|---|---|
-| Lazy-load Admin/Lab | NOT DONE (no `React.lazy`) |
-| Virtualize Library Songs | NOT DONE (do only if profiling shows need) |
-| Media Session API | DONE in baseline (unchanged, 6 refs) |
-| New unit tests (cache, routes, useAction, jobs) | CODE-ONLY (not run) |
-| `perf-check.mjs` before/after numbers | NOT DONE |
-| Secrets: untrack google-services, `.gitignore`, rotate keys | NOT DONE (files still tracked; see R-08) |
+## Phase 7 — Notifications, reviews, and administration
 
----
-
-## E. Going-forward items (after section A is green)
-
-| ID | Item | Status |
+| Item | Status | Verification |
 |---|---|---|
-| N-01 | Confirmation modal for destructive admin actions | NOT DONE |
-| N-02 | Lazy-load Admin and Lab | NOT DONE |
-| N-03 | Feedback pattern for upload/like/playlist/sign-in/profile | NOT DONE |
-| N-04 | Genres group + genre playlist page | NOT DONE |
-| N-05 | Artist Mix and Artist Radio (backend + UI) | NOT DONE |
-| N-06 | Android feedback, caching, genre playlists | NOT DONE |
-| N-07 | Virtualization (only if needed) | NOT DONE |
-| N-08 | Perf measurements recorded | NOT DONE |
-| N-09 | New Arrivals mix (backend + UI) | NOT DONE |
-| N-10 | Global network progress bar + offline banner | NOT DONE |
+| In-app notification feed; order placed, seller new-order, paid, confirmed, dispatched, delivered, and listing moderation events | DONE | Local tests cover feed access/read behavior and existing lifecycle tests exercise emitted events |
+| Optional email and Africa's Talking SMS adapters | CODE-ONLY | Configuration validation and adapter code are present; no external provider credentials or delivery destination were configured |
+| Buyer reviews limited to completed orders containing the product; one review per order/product | DONE | `phase7.test.js` verifies ineligible reviews, successful submission, and duplicate rejection |
+| Product rating average and count updated atomically in MongoDB | CODE-ONLY | MongoDB aggregation-pipeline update implemented; local MongoDB is unavailable |
+| Admin listing review, seller suspension and verification, filtered order/payment lists, dispute resolution, CSV export | CODE-ONLY | Routes and scoped store operations implemented; live Mongo persistence and end-to-end admin verification remain outstanding |
+| Admin write actions recorded in `auditLog` | CODE-ONLY | Audit writes wired to each admin mutation and CSV export; live Mongo persistence unavailable |
+| Seller verification shown on the public seller profile for the frontend badge | DONE | Public seller profile response already exposes `sellerProfile.verified`; frontend wiring follows in Phase 8 |
+| Backend tests | DONE | `npm --prefix backend test` — 50 passed, 0 failed |
+| Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
----
+In-app notification storage uses MongoDB when configured and memory for local execution. External delivery, MongoDB-backed reviews/admin actions, and operational verification require later configuration/testing.
 
-## F. Change log
+## Phase 8 — Modular marketplace frontend
 
-| Date | Commit | Item | Notes |
-|---|---|---|---|
-| | | | |
+| Item | Status | Verification |
+|---|---|---|
+| Replace the Web entry point with a modular AgriStore React app while retaining the legacy app until parity is proven | DONE | `Web/src/main.jsx` boots the marketplace modules; the legacy app and its tests remain in the tree |
+| Buyer flows: browse/search/filter, product details, cart, seller profiles, checkout, payment return, orders, and reviews | CODE-ONLY | Routes and API wiring are implemented; live Firebase, MongoDB, and PesaPal flows are not configured |
+| Seller and admin flows, seller onboarding, listing image uploads, order management, and admin views | CODE-ONLY | UI and seller-profile API are implemented; persistence and live role-based flows need configured services |
+| Firebase email/password and Google sign-in; optional SMS behind an explicit build flag | CODE-ONLY | Modular Firebase integration builds; authentication providers cannot be exercised without Firebase configuration |
+| English/Swahili labels, KES formatting, responsive styles, image upload progress, and PWA assets | DONE | Web tests pass; responsive widths 390, 800, 1100, and 1440 were manually checked in the integrated browser with no horizontal overflow |
+| GitHub Pages path routing and runtime configuration | DONE | Production build contains the SPA path restore logic and `/sonara/` asset base; deployment reads Firebase/API settings from repository variables |
+| Backend tests | DONE | `npm --prefix backend test` — 51 passed, 0 failed |
+| Web tests | DONE | `npm --prefix Web test` — 34 passed, 0 failed, including legacy regression coverage |
+| Production frontend build | DONE | `npm --prefix Web run build` completed |
+| Automated Playwright layout screenshots | BLOCKED | `npm --prefix Web run qa:layout` cannot launch because the Playwright Chromium executable is missing; browser download previously timed out |
+
+The responsive browser check is not a substitute for the automated light/dark screenshot matrix. Full buyer/seller/admin parity and live service integration remain unverified; do not remove the retained legacy app/tests until those flows are explicitly compared.
+
+## Phase 9 — Cleanup, documentation, and operations
+
+| Item | Status | Verification |
+|---|---|---|
+| Add authenticated listing report submission with duplicate protection and per-user rate limiting | DONE | `reports.test.js` verifies valid, duplicate, invalid, and seller-self-report cases |
+| Add admin report queue and reasoned listing takedown with audit event | DONE | `reports.test.js` verifies active listing removal and audit logging |
+| Add AgriStore root/Web READMEs and API, architecture, payments/payouts, privacy, legal-draft, and go-live docs | DONE | Documentation reviewed against current route/config behavior; legal copy is explicitly marked draft-only |
+| Update Render blueprints and backend route docs for AgriStore | DONE | Removed stale Sonara project/database values, unused variables, and invalid Pages path from the CORS origin |
+| Remove all legacy Sonara music app assets/tests and docs | DEFERRED | Retained legacy Web app and regression tests because complete marketplace flow parity is not proven; Android remains the explicitly frozen legacy app |
+| Backend tests | DONE | `npm --prefix backend test` — 53 passed, 0 failed |
+| Web tests and production build | DONE | `npm --prefix Web test` — 34 passed, 0 failed; `npm --prefix Web run build` completed |
+
+The report API stores records in MongoDB when configured and uses an in-memory store for local tests. MongoDB report persistence and the live administrator workflow remain unverified without a configured database. Seller payout automation and self-service account deletion remain out of scope and are called out in the operating/legal docs.
+
+## Phase 10 — Release quality and handoff
+
+| Item | Status | Verification |
+|---|---|---|
+| Backend and Web regression suites | DONE | `npm --prefix backend test` — 53 passed; `npm --prefix Web test` — 34 passed |
+| Production Web build | DONE | `npm run build:web` completed |
+| Responsive smoke check with mocked catalog data | DONE | Integrated browser checked home at 390/800/1100/1440 px in light and dark modes; product detail checked at all four widths. No horizontal overflow or card overlap observed |
+| Playwright automated screenshot/layout job | BLOCKED | Repository `qa:layout` runner still needs the Playwright Chromium binary; prior browser download attempts timed out |
+| Dependency upgrades and audits | DONE | Upgraded Firebase, React Router, Vite, the Vite React plugin, and Firebase Admin; pinned the vulnerable transitive `@grpc/grpc-js` through an npm override. `npm --prefix Web audit` and `npm --prefix backend audit --omit=dev` report 0 vulnerabilities |
+| Regression suites and production build after upgrades | DONE | Backend: 53 passed; Web: 34 passed; `npm --prefix Web run build` completed with Vite 8.3.5 |
+| Firebase/MongoDB/R2/PesaPal sandbox end-to-end and audit persistence | BLOCKED | External service configuration and credentials are unavailable in this environment |
+| Legacy music-code retirement after AgriStore parity | BLOCKED | Full parity has not been demonstrated; old Web app/tests and the frozen Android app remain |
+| Open pull request to `main` | BLOCKED | Not opened: automated layout QA, live service flows, and legacy parity are release gates still outstanding |
+
+The current local branch contains Phase 8 and Phase 9 commits plus the reviewed dependency upgrades; the final release handoff is intentionally incomplete. Run the automated and configured-service checks and verify parity before opening a release PR.
+
+## User-requested Phase 1 — Proposal alignment (2026-10-30)
+
+| Item | Status | Verification |
+|---|---|---|
+| Product price comparison endpoint and product/browse comparison views | DONE | Local backend tests exercise normalized matching, county filtering, price order, seller/location/rating response; Web tests (38 passed) and production build pass |
+| Messaging conversations, participant authorization, bounded plain-text messages, cursor paging, read receipts, and reports | DONE | Local HTTP tests cover participant denial, sanitation/length enforcement, and admin access only through an open report; Web tests/build pass |
+| In-app notifications, unread count, read actions, and order/payment/listing events | DONE | Local notification endpoint tests pass; existing order/payment lifecycle tests execute event emission |
+| Optional email/SMS adapters | CODE-ONLY | Email webhook and Africa's Talking adapter require external configuration and were not live-tested |
+| Admin category CRUD, user summary/seller administration, and summary/CSV reporting | CODE-ONLY | Routes and UI are implemented; injected route tests pass. MongoDB report aggregation and live admin workflows were not verified |
+| Proposal alignment matrix | DONE | [`PROPOSAL-ALIGNMENT.md`](./PROPOSAL-ALIGNMENT.md) maps the supplied requirements; the proposal PDF itself was unavailable, so Appendix II–IV wording is not claimed |
+| Backend regression suite | DONE | `npm --prefix backend test` — 59 passed, 0 failed |
+| Web regression suite and production build | DONE | `npm --prefix Web test` — 38 passed, 0 failed; `npm --prefix Web run build` completed |
+| Firebase, MongoDB, R2, payment, and external-notification live verification | BLOCKED | No external services were configured or accessed for this phase |

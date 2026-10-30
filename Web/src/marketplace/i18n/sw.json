@@ -1,0 +1,213 @@
+{
+  "brand": "AgriStore",
+  "home": "Nyumbani",
+  "browse": "Tafuta mazao",
+  "cart": "Kikapu",
+  "orders": "Maagizo yangu",
+  "account": "Akaunti",
+  "signIn": "Ingia",
+  "signOut": "Toka",
+  "search": "Tafuta mazao",
+  "searchPlaceholder": "Tafuta nyanya, mahindi, parachichi…",
+  "category": "Aina",
+  "county": "Kaunti",
+  "minPrice": "Bei ya chini (KES)",
+  "maxPrice": "Bei ya juu (KES)",
+  "sort": "Panga kwa",
+  "newest": "Mpya zaidi",
+  "priceAsc": "Bei: chini hadi juu",
+  "priceDesc": "Bei: juu hadi chini",
+  "topRated": "Zilizokadiriwa zaidi",
+  "nearest": "Karibu zaidi",
+  "allCategories": "Aina zote",
+  "allCounties": "Kaunti zote",
+  "addToCart": "Weka kikapuni",
+  "addedToCart": "Imeongezwa kikapuni",
+  "quantity": "Kiasi",
+  "available": "inapatikana",
+  "per": "kwa",
+  "loading": "Inapakia…",
+  "loadMore": "Pakia zaidi",
+  "emptyProducts": "Hakuna bidhaa zinazolingana na vichujio hivi.",
+  "tryAgain": "Jaribu tena",
+  "error": "Hitilafu imetokea.",
+  "serverSleeping": "Huduma haipatikani au inaanza. Tafadhali jaribu tena baadaye.",
+  "checkout": "Lipa",
+  "continueShopping": "Endelea kununua",
+  "remove": "Ondoa",
+  "pickup": "Kuchukua",
+  "sellerDelivery": "Muuzaji ataleta",
+  "town": "Mji",
+  "phone": "Nambari ya simu",
+  "deliveryNotes": "Maelezo ya uwasilishaji",
+  "placeOrder": "Weka agizo",
+  "orderSummary": "Muhtasari wa agizo",
+  "pay": "Lipa kwa M-Pesa / kadi",
+  "paymentConfirming": "Tunathibitisha malipo kupitia seva…",
+  "paymentPaid": "Seva imethibitisha malipo.",
+  "paymentPending": "Malipo bado hayajathibitishwa.",
+  "status": "Hali",
+  "product": "Bidhaa",
+  "seller": "Muuzaji",
+  "verifiedSeller": "Muuzaji aliyethibitishwa",
+  "sellerDashboard": "Dashibodi ya muuzaji",
+  "sellerOrders": "Maagizo yanayoingia",
+  "myProducts": "Bidhaa zangu",
+  "newProduct": "Bidhaa mpya",
+  "editProduct": "Hariri bidhaa",
+  "save": "Hifadhi",
+  "title": "Jina",
+  "description": "Maelezo",
+  "unit": "Kipimo",
+  "price": "Bei kwa kipimo (KES)",
+  "stock": "Kiasi kinachopatikana",
+  "minimum": "Kiasi cha chini cha agizo",
+  "photos": "Picha",
+  "countyTown": "Kaunti na mji",
+  "useLocation": "Tumia eneo la karibu",
+  "locationPrivacy": "Eneo lako hupunguzwa usahihi kabla ya kuhifadhiwa ili kulinda shamba.",
+  "uploading": "Inapakia",
+  "sellerProfile": "Wasifu wa muuzaji",
+  "displayName": "Jina la biashara au shamba",
+  "bio": "Kuhusu shamba lako",
+  "createSellerProfile": "Hifadhi wasifu",
+  "signInToContinue": "Ingia ili kuendelea.",
+  "email": "Barua pepe",
+  "password": "Nenosiri",
+  "createAccount": "Fungua akaunti",
+  "googleSignIn": "Endelea na Google",
+  "phoneSignIn": "Ingia kwa simu",
+  "language": "Lugha",
+  "english": "English",
+  "swahili": "Kiswahili",
+  "admin": "Msimamizi",
+  "adminListings": "Kagua bidhaa",
+  "adminOrders": "Maagizo na malipo",
+  "approve": "Idhinisha",
+  "reject": "Kataa",
+  "exportCsv": "Pakua maagizo CSV",
+  "review": "Andika tathmini",
+  "reportListing": "Ripoti bidhaa hii",
+  "signInToReport": "Ingia ili kuripoti bidhaa hii.",
+  "reportReason": "Sababu",
+  "reportDetails": "Maelezo ya ziada",
+  "submitReport": "Tuma ripoti",
+  "reportSubmitted": "Ripoti imetumwa ikaguliwe.",
+  "reportUnsafe": "Si salama",
+  "reportMisleading": "Inapotosha",
+  "reportProhibited": "Bidhaa iliyopigwa marufuku",
+  "reportOther": "Sababu nyingine",
+  "listingReports": "Ripoti za bidhaa",
+  "noListingReports": "Hakuna ripoti za bidhaa zilizo wazi.",
+  "takedownReason": "Sababu ya kuondoa bidhaa",
+  "takeDownListing": "Ondoa bidhaa",
+  "report_unsafe": "Si salama",
+  "report_misleading": "Inapotosha",
+  "report_prohibited": "Bidhaa iliyopigwa marufuku",
+  "report_other": "Sababu nyingine",
+  "rating": "Ukadiriaji",
+  "comment": "Maoni",
+  "submitReview": "Tuma tathmini",
+  "deliveryMethod": "Njia ya uwasilishaji",
+  "notFound": "Ukurasa huu haupatikani."
+  ,"tagline": "Mazao ya Kenya, karibu nawe"
+  ,"heroTitle": "Mazao mapya kutoka mashamba kote Kenya."
+  ,"heroBody": "Gundua mazao ya msimu na uwasiliane moja kwa moja na wauzaji."
+  ,"marketplace": "Soko"
+  ,"inSeason": "Tafuta yaliyo katika msimu"
+  ,"cartEmpty": "Kikapu chako hakina bidhaa."
+  ,"eachSellerOrder": "Agizo la kila muuzaji hulipwa kivyake."
+  ,"finalServerCalculation": "Jumla ya mwisho huhesabiwa na seva."
+  ,"nearMe": "Tumia eneo langu la karibu"
+  ,"validKenyanPhone": "Weka nambari sahihi ya simu ya Kenya."
+  ,"minimumQuantityError": "Chagua angalau {min} na isiyozidi {max}."
+  ,"imageRequired": "Ongeza angalau picha moja ya bidhaa."
+  ,"requiredProductFields": "Jaza sehemu zinazohitajika kwa bei na kiasi chanya."
+  ,"reviewSubmitted": "Tathmini imetumwa."
+  ,"payments": "Malipo"
+  ,"view": "Tazama"
+  ,"confirmOrder": "Thibitisha agizo"
+  ,"markDispatched": "Weka kuwa limetumwa"
+  ,"markDelivered": "Weka kuwa limefikishwa"
+  ,"markReceived": "Thibitisha kupokea"
+  ,"orderNumber": "Agizo"
+  ,"deliveryAddress": "Uwasilishaji"
+  ,"sellerProfileSaved": "Wasifu wa muuzaji umehifadhiwa."
+  ,"codeSent": "Nambari ya uthibitisho imetumwa."
+  ,"verificationCode": "Nambari ya uthibitisho"
+  ,"sendCode": "Tuma nambari"
+  ,"verify": "Thibitisha"
+  ,"signInPrompt": "Ingia ili kuendelea."
+  ,"locationNotAvailable": "Eneo halipatikani kwenye kivinjari hiki."
+  ,"locationPermission": "Ruhusa ya eneo haijatolewa."
+  ,"returnOrders": "Rudi kwenye maagizo yako kuangalia hali ya malipo."
+  ,"status_pending_payment": "Malipo yanasubiri"
+  ,"status_paid": "Imelipwa"
+  ,"status_confirmed": "Imethibitishwa"
+  ,"status_dispatched": "Imetumwa"
+  ,"status_delivered": "Imefikishwa"
+  ,"status_completed": "Imekamilika"
+  ,"status_cancelled": "Imeghairiwa"
+  ,"status_refunded": "Imerejeshwa"
+  ,"status_disputed": "Ina mgogoro"
+  ,"status_pending": "Inasubiri ukaguzi"
+  ,"status_active": "Inapatikana"
+  ,"status_paused": "Imesitishwa"
+  ,"status_removed": "Imeondolewa"
+  ,"status_sold_out": "Imeisha"
+  ,"comparePrices": "Linganisha bei"
+  ,"sameCounty": "Kaunti ileile"
+  ,"comparisonDescription": "Bidhaa zinazofanana katika"
+  ,"sortedByUnit": "zimepangwa kwa bei kwa"
+  ,"thisListing": "Bidhaa hii"
+  ,"comparisonLoading": "Inapakia ulinganisho wa bei…"
+  ,"notRated": "Bado haijakadiriwa"
+  ,"noSimilarListings": "Hakuna bidhaa zinazofanana za kulinganisha kwa sasa."
+  ,"farmer": "Mkulima"
+  ,"contactFarmer": "Wasiliana na mkulima"
+  ,"messages": "Ujumbe"
+  ,"pollingNote": "Ujumbe husasishwa kila baada ya sekunde chache. Tunatumia ukaguzi wa mara kwa mara badala ya muunganisho wa kudumu ili kusaidia intaneti dhaifu."
+  ,"noConversations": "Hakuna mazungumzo bado. Wasiliana na mkulima kupitia tangazo."
+  ,"chooseListingFirst": "Chagua bidhaa kabla ya kuanzisha mazungumzo."
+  ,"firstMessage": "Ujumbe wa kwanza"
+  ,"sending": "Inatuma…"
+  ,"sendMessage": "Tuma ujumbe"
+  ,"inbox": "Kikasha"
+  ,"conversation": "Mazungumzo"
+  ,"threadPollingNote": "Mazungumzo haya hukagua ujumbe mpya kila sekunde 5; hayatumii WebSockets."
+  ,"loadOlderMessages": "Pakia ujumbe wa awali"
+  ,"message": "Ujumbe"
+  ,"send": "Tuma"
+  ,"reportConversation": "Ripoti mazungumzo"
+  ,"sendReport": "Tuma ripoti"
+  ,"reportedForReview": "Mazungumzo yameripotiwa kwa ukaguzi wa msimamizi."
+  ,"notifications": "Arifa"
+  ,"markAllRead": "Weka zote kuwa zimesomwa"
+  ,"markRead": "Weka kuwa imesomwa"
+  ,"noNotifications": "Hakuna arifa bado."
+  ,"notificationUnavailable": "Arifa hazipatikani"
+  ,"reportedConversations": "Mazungumzo yaliyoripotiwa"
+  ,"readReportedMessages": "Soma ujumbe ulioripotiwa"
+  ,"noOpenConversationReports": "Hakuna ripoti za mazungumzo zilizo wazi."
+  ,"manageCategories": "Simamia aina za bidhaa"
+  ,"newCategory": "Aina mpya"
+  ,"addCategory": "Ongeza aina"
+  ,"delete": "Futa"
+  ,"manageUsers": "Simamia watumiaji"
+  ,"suspendFarmer": "Sitisha mkulima"
+  ,"suspended": "Imesitishwa"
+  ,"activeAccount": "Inatumika"
+  ,"marketplaceSummary": "Muhtasari wa soko"
+  ,"exportSummaryCsv": "Pakua muhtasari wa CSV"
+  ,"users": "Watumiaji"
+  ,"gmv": "Thamani ya mauzo"
+  ,"paidOrders": "maagizo yaliyolipwa"
+  ,"payoutRecords": "Rekodi za malipo ya wauzaji"
+  ,"listingsByCategory": "Matangazo kwa aina"
+  ,"listingsByCounty": "Matangazo kwa kaunti"
+  ,"ordersByStatus": "Maagizo kwa hali"
+  ,"loadingReport": "Inapakia ripoti…"
+  ,"accountRole": "Jukumu la akaunti"
+  ,"buyer": "Mnunuzi"
+  ,"administrator": "Msimamizi"
+}
