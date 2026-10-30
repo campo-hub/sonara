@@ -18,13 +18,13 @@ Decisions collected before Phase 5 implementation:
 | Listing report policy | Signed-in users can report a public active listing once per account; admins may remove a reported listing with a required reason and audit record. |
 | Seller payouts | Automated seller payouts are not implemented; the operator must document a manual settlement and reconciliation process before live transactions. |
 
-The existing hash-based Web routing is compatible with GitHub Pages static hosting. Revisit hosting and plan selection before production if deployment requirements change.
+Hash-based Web routing is compatible with GitHub Pages static hosting. Revisit hosting and plan selection before production if deployment requirements change.
 
 Frontend rebuild decisions:
 
 | Topic | Decision |
 |---|---|
-| Browser routing on GitHub Pages | Use `BrowserRouter` with a GitHub Pages `404.html` redirect/restore shim. This preserves ordinary path URLs for PesaPal query parameters without changing the selected hosting provider. |
+| Browser routing on GitHub Pages | Use `HashRouter` so app routes and query parameters remain within the root document URL and do not request nonexistent static paths from GitHub Pages. Keep a custom `404.html` fallback in Vite's `public/` directory to redirect old path-style links to the equivalent hash URL. |
 | Firebase Web configuration in CI | Read the public Firebase web configuration and API base URL from GitHub repository variables; do not retain the legacy Sonara Firebase config in the workflow. |
 | SMS sign-in rollout | Keep the code behind `VITE_ENABLE_PHONE_AUTH`; default it to `false` until SMS cost and rollout are explicitly approved. |
 

@@ -31,4 +31,4 @@ The Playwright layout command requires the Chromium browser installed for the re
 - Required GitHub Pages variables and Render environment values are documented in [`docs/GO-LIVE.md`](./docs/GO-LIVE.md).
 - Do not enable live payments until the production checklist and PesaPal sandbox verification are complete.
 
-The GitHub Pages project URL currently retains the repository path `/sonara/`; changing it requires updating the Vite base path, 404 redirect, and deployment configuration together.
+The GitHub Pages project URL currently retains the repository path `/sonara/`; app navigation uses hash routes to work with static hosting. Changing the project URL requires updating the Vite base path and legacy-link redirect together.

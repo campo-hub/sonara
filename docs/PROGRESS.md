@@ -153,7 +153,7 @@ In-app notification storage uses MongoDB when configured and memory for local ex
 | Seller and admin flows, seller onboarding, listing image uploads, order management, and admin views | CODE-ONLY | UI and seller-profile API are implemented; persistence and live role-based flows need configured services |
 | Firebase email/password and Google sign-in; optional SMS behind an explicit build flag | CODE-ONLY | Modular Firebase integration builds; authentication providers cannot be exercised without Firebase configuration |
 | English/Swahili labels, KES formatting, responsive styles, image upload progress, and PWA assets | DONE | Web tests pass; responsive widths 390, 800, 1100, and 1440 were manually checked in the integrated browser with no horizontal overflow |
-| GitHub Pages path routing and runtime configuration | DONE | Production build contains the SPA path restore logic and `/sonara/` asset base; deployment reads Firebase/API settings from repository variables |
+| GitHub Pages routing and runtime configuration | DONE | Web app routes use `HashRouter` to avoid unsupported static paths; a public 404 fallback redirects legacy paths; `/sonara/` remains the asset base |
 | Backend tests | DONE | `npm --prefix backend test` — 51 passed, 0 failed |
 | Web tests | DONE | `npm --prefix Web test` — 34 passed, 0 failed, including legacy regression coverage |
 | Production frontend build | DONE | `npm --prefix Web run build` completed |

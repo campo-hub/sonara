@@ -5,8 +5,8 @@
     <script>
       const base = '/sonara';
       const path = location.pathname.startsWith(base) ? location.pathname.slice(base.length) : location.pathname;
-      const route = `${path}${location.search}${location.hash}`;
-      location.replace(`${base}/?__spa=${encodeURIComponent(route)}`);
+      const route = `${path || '/'}${location.search}${location.hash}`;
+      location.replace(`${base}/#${route}`);
     </script>
   </body>
 </html>
