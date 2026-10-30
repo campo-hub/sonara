@@ -25,4 +25,4 @@ The layout check opens 390, 800, 1100, and 1440 pixel viewports in light and dar
 
 ## Hosting paths
 
-GitHub Pages currently serves the repository project site at `/sonara/`. `vite.config.js`, `404.html`, and the SPA restore logic in `index.html` intentionally use this base. Keep them aligned if the repository or Pages URL changes.
+GitHub Pages currently serves the repository project site at `/sonara/`. Vite assets use that base, and application routes use hash URLs (for example `/#/browse?sort=newest`) so page navigation and refreshes do not request unsupported static paths. A custom `public/404.html` redirects older path-style links. Keep both in sync if the repository or Pages URL changes.

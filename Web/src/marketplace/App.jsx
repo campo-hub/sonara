@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
 import { CartProvider } from './hooks/useCartContext.jsx';
 import { I18nProvider, useI18n } from './hooks/useI18n.jsx';
@@ -33,8 +33,7 @@ function ServerBanner() {
 }
 
 function MarketplaceShell() {
-  const basename = new URL(import.meta.env.BASE_URL, location.origin).pathname.replace(/\/$/, '');
-  return <BrowserRouter basename={basename} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Header /><ServerBanner /><Routes>
+  return <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Header /><ServerBanner /><Routes>
     <Route path="/" element={<Pages.Home />} />
     <Route path="/browse" element={<Pages.Browse />} />
     <Route path="/products/:id" element={<Pages.ProductDetail />} />
@@ -65,7 +64,7 @@ function MarketplaceShell() {
     <Route path="/sign-in" element={<Pages.SignIn />} />
     <Route path="/account" element={<RequireAuth><Pages.Account /></RequireAuth>} />
     <Route path="*" element={<Pages.NotFound />} />
-  </Routes><Footer /></BrowserRouter>;
+  </Routes><Footer /></HashRouter>;
 }
 
 export default function App() {

@@ -335,8 +335,9 @@ export function Checkout() {
 
 export function CheckoutReturn() {
   const { t } = useI18n();
+  const [searchParams] = useSearchParams();
   const [orderId] = useState(() => {
-    try { return localStorage.getItem('agristore.pending-order') || new URLSearchParams(location.search).get('orderId') || ''; }
+    try { return localStorage.getItem('agristore.pending-order') || searchParams.get('orderId') || new URLSearchParams(location.search).get('orderId') || ''; }
     catch { return ''; }
   });
   const [order, setOrder] = useState(null);
