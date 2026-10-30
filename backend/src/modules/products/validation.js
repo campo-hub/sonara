@@ -1,6 +1,6 @@
 import { parseMoney } from '../../lib/money.js';
 import { roundCoordinates } from '../../lib/geo.js';
-import { PRODUCT_CATEGORIES, PRODUCT_UNITS } from '../../models/marketplace.js';
+import { PRODUCT_UNITS } from '../../models/marketplace.js';
 import { HttpError } from '../../middleware/errors.js';
 
 const optionalText = (value, field, maxLength) => {
@@ -60,7 +60,7 @@ export function parseProductFields(body, { partial = false } = {}) {
   assignText('description', 5000, !partial);
   assignText('category', 100, !partial);
   assignText('unit', 20, !partial);
-  if (fields.category && !PRODUCT_CATEGORIES.includes(fields.category)) {
+  if (fields.category && !/^[a-z0-9][a-z0-9 &_-]*$/i.test(fields.category)) {
     throw new HttpError(400, 'category is not supported.', 'INVALID_PRODUCT');
   }
   if (fields.unit && !PRODUCT_UNITS.includes(fields.unit)) {

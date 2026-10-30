@@ -70,7 +70,7 @@ export function validateProduct(product) {
   if (!isUuid(product.id) || !nonEmptyString(product.sellerUid, 128)) return 'Product id must be a UUID and sellerUid is required.';
   if (!PRODUCT_STATUSES.includes(product.status)) return 'Product status is invalid.';
   if (!nonEmptyString(product.title, 160) || !nonEmptyString(product.description, 5000)) return 'Product title or description is invalid.';
-  if (!PRODUCT_CATEGORIES.includes(product.category)) return 'Product category is invalid.';
+  if (typeof product.category !== 'string' || !/^[a-z0-9][a-z0-9 &_-]{0,99}$/i.test(product.category)) return 'Product category is invalid.';
   if (!PRODUCT_UNITS.includes(product.unit)) return 'Product unit is invalid.';
   if (!moneyAmount(product.pricePerUnit) || product.pricePerUnit < 1) return 'pricePerUnit must be a positive whole-shilling KES amount.';
   if (!finiteNumber(product.minOrder, 0.000001)

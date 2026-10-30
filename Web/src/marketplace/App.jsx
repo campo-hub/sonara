@@ -6,6 +6,8 @@ import { I18nProvider, useI18n } from './hooks/useI18n.jsx';
 import { Header } from './components/Header.jsx';
 import { Footer } from './components/Footer.jsx';
 import * as Pages from './pages/Pages.jsx';
+import { CompareView } from './pages/PriceComparison.jsx';
+import { AdminMessageReports, MessageInbox, MessageThread, NewConversation, NotificationFeed } from './pages/Communications.jsx';
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -36,6 +38,7 @@ function MarketplaceShell() {
     <Route path="/" element={<Pages.Home />} />
     <Route path="/browse" element={<Pages.Browse />} />
     <Route path="/products/:id" element={<Pages.ProductDetail />} />
+    <Route path="/compare/:id" element={<CompareView />} />
     <Route path="/sellers/:uid" element={<Pages.SellerProfilePublic />} />
     <Route path="/cart" element={<Pages.Cart />} />
     <Route path="/checkout" element={<Pages.Checkout />} />
@@ -50,8 +53,15 @@ function MarketplaceShell() {
     <Route path="/seller/profile" element={<RequireAuth><Pages.SellerProfile /></RequireAuth>} />
     <Route path="/admin" element={<RequireAuth><Pages.AdminHome /></RequireAuth>} />
     <Route path="/admin/listings" element={<RequireAuth><Pages.AdminListings /></RequireAuth>} />
+    <Route path="/admin/users" element={<RequireAuth><Pages.AdminUsers /></RequireAuth>} />
     <Route path="/admin/reports" element={<RequireAuth><Pages.AdminReports /></RequireAuth>} />
     <Route path="/admin/orders" element={<RequireAuth><Pages.AdminOrders /></RequireAuth>} />
+    <Route path="/admin/categories" element={<RequireAuth><Pages.AdminCategories /></RequireAuth>} />
+    <Route path="/admin/message-reports" element={<RequireAuth><AdminMessageReports /></RequireAuth>} />
+    <Route path="/messages" element={<RequireAuth><MessageInbox /></RequireAuth>} />
+    <Route path="/messages/new" element={<RequireAuth><NewConversation /></RequireAuth>} />
+    <Route path="/messages/:id" element={<RequireAuth><MessageThread /></RequireAuth>} />
+    <Route path="/notifications" element={<RequireAuth><NotificationFeed /></RequireAuth>} />
     <Route path="/sign-in" element={<Pages.SignIn />} />
     <Route path="/account" element={<RequireAuth><Pages.Account /></RequireAuth>} />
     <Route path="*" element={<Pages.NotFound />} />

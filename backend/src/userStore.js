@@ -26,6 +26,14 @@ export async function getUserProfile(uid) {
   return memoryUsers.get(uid) || null;
 }
 
+export async function listUserProfiles(limit = 100) {
+  const collection = await getUserCollection();
+  if (!collection) return [...memoryUsers.values()].slice(0, limit);
+  return collection.find({}, {
+    projection: { _id: 0, uid: 1, email: 1, username: 1, roles: 1, sellerProfile: 1, createdAt: 1, updatedAt: 1 }
+  }).sort({ createdAt: -1 }).limit(limit).toArray();
+}
+
 export async function getUserRoles(uid) {
   const profile = await getUserProfile(uid);
   const roles = Array.isArray(profile?.roles) ? profile.roles : ['buyer'];

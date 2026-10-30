@@ -91,9 +91,10 @@ test('admin listing actions are protected and audited', async (t) => {
         ? next()
         : next(Object.assign(new Error('Forbidden'), { status: 403, code: 'FORBIDDEN' })),
       audit: async (entry) => audits.push(entry),
+      notifyFn: async () => {},
       changeProduct: async (id, update, expectedStatus) => (
         id === 'product-1' && expectedStatus === 'pending'
-          ? { id, status: update.status }
+          ? { id, status: update.status, sellerUid: 'seller-1', title: 'Tomatoes' }
           : null
       )
     }))

@@ -12,7 +12,7 @@ export function FilterBar({ filters, onChange, categories, counties }) {
         <span>{t('category')}</span>
         <select value={filters.category} onChange={(event) => onChange('category', event.target.value)}>
           <option value="">{t('allCategories')}</option>
-          {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+          {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
         </select>
       </label>
       <label>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { get, post, put, upload } from '../lib/api.js';
+import { del, get, patch, post, put, upload } from '../lib/api.js';
 import { formatMoney } from '../lib/money.js';
 import { formatDate } from '../lib/format.js';
 import { COUNTIES } from '../lib/counties.js';
@@ -11,6 +11,8 @@ import { useGeolocation } from '../hooks/useGeolocation.js';
 import { useI18n } from '../hooks/useI18n.jsx';
 import { phoneAuthEnabled, sendPhoneCode } from '../firebase.js';
 import { ImageGallery } from '../components/ImageGallery.jsx';
+import { PriceComparisonPanel } from './PriceComparison.jsx';
+import { adminDashboardMetrics } from '../lib/featureUtils.js';
 import { ProductGrid } from '../components/ProductGrid.jsx';
 import { FilterBar } from '../components/FilterBar.jsx';
 import { PriceTag } from '../components/PriceTag.jsx';
@@ -182,6 +184,7 @@ export function ProductDetail() {
           <p>{available} {product.unit} {t('available')}</p>
           {product.ratingCount > 0 && <p className="rating">★ {product.ratingAvg} ({product.ratingCount})</p>}
           <SellerLink uid={product.sellerUid} />
+          <PriceComparisonPanel product={product} />
           {user && user.uid !== product.sellerUid && <details className="report-listing">
             <summary>{t('reportListing')}</summary>
             <form className="stack-form" onSubmit={submitReport}>
@@ -222,9 +225,10 @@ export function SellerProfilePublic() {
   const [error, setError] = useState('');
   useEffect(() => { get(`/sellers/${encodeURIComponent(uid)}`).then(setData).catch((err) => setError(err.message)); }, [uid]);
   const { t } = useI18n();
+  const { user } = useAuth();
   if (error) return <main className="page"><ErrorMessage message={error} /></main>;
   if (!data) return <main className="page"><Skeletons /></main>;
-  return <main className="page"><div className="seller-heading"><p className="eyebrow">{data.seller.county}, {data.seller.town}</p><h1>{data.seller.displayName}</h1>{data.seller.verified && <span className="verified-badge">✓ {t('verifiedSeller')}</span>}<p>{data.seller.bio}</p></div><ProductGrid products={data.products} /></main>;
+  return <main className="page"><div className="seller-heading"><p className="eyebrow">{data.seller.county}, {data.seller.town}</p><h1>{data.seller.displayName}</h1>{data.seller.verified && <span className="verified-badge">✓ {t('verifiedSeller')}</span>}<p>{data.seller.bio}</p>{data.products[0] && user?.uid !== uid && <Link className="button button-primary" to={`/messages/new?productId=${encodeURIComponent(data.products[0].id)}`}>{t('contactFarmer')}</Link>}</div><ProductGrid products={data.products} /></main>;
 }
 
 export function Cart() {
@@ -499,7 +503,7 @@ export function ProductForm() {
   return <main className="page narrow-page"><h1>{editing ? t('editProduct') : t('newProduct')}</h1><form className="stack-form" onSubmit={save}>
     <label>{t('title')}<input required maxLength={160} value={form.title} onChange={update('title')} /></label>
     <label>{t('description')}<textarea required maxLength={5000} value={form.description} onChange={update('description')} /></label>
-    <label>{t('category')}<select value={form.category} onChange={update('category')}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+    <label>{t('category')}<select value={form.category} onChange={update('category')}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
     <label>{t('unit')}<select value={form.unit} onChange={update('unit')}>{['kg','g','bag','crate','bunch','piece','litre','tray'].map((unit) => <option key={unit}>{unit}</option>)}</select></label>
     <label>{t('price')}<input type="number" min="1" step="1" required value={form.pricePerUnit} onChange={update('pricePerUnit')} /></label>
     <label>{t('stock')}<input type="number" min="0.001" step="any" required value={form.quantityAvailable} onChange={update('quantityAvailable')} /></label>
@@ -544,7 +548,73 @@ export function SellerProfile() {
 
 export function AdminHome() {
   const { t } = useI18n();
-  return <main className="page"><h1>{t('admin')}</h1><div className="dashboard-grid"><Link className="dashboard-tile" to="/admin/listings">{t('adminListings')}</Link><Link className="dashboard-tile" to="/admin/reports">{t('listingReports')}</Link><Link className="dashboard-tile" to="/admin/orders">{t('adminOrders')}</Link></div></main>;
+  const [summary, setSummary] = useState(null);
+  const metrics = adminDashboardMetrics(summary);
+  const [error, setError] = useState('');
+  useEffect(() => { get('/admin/reports/summary').then(({ summary: value }) => setSummary(value)).catch((err) => setError(err.message)); }, []);
+  const exportSummary = async () => {
+    try {
+      const csv = await get('/admin/reports/summary.csv');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'agristore-summary.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) { setError(err.message); }
+  };
+  return <main className="page"><h1>{t('admin')}</h1><div className="dashboard-grid"><Link className="dashboard-tile" to="/admin/users">{t('manageUsers')}</Link><Link className="dashboard-tile" to="/admin/listings">{t('adminListings')}</Link><Link className="dashboard-tile" to="/admin/reports">{t('listingReports')}</Link><Link className="dashboard-tile" to="/admin/categories">{t('manageCategories')}</Link><Link className="dashboard-tile" to="/admin/message-reports">{t('reportedConversations')}</Link><Link className="dashboard-tile" to="/admin/orders">{t('adminOrders')}</Link></div>
+    <section className="section"><div className="section-heading"><h2>{t('marketplaceSummary')}</h2><button className="button button-secondary" onClick={exportSummary}>{t('exportSummaryCsv')}</button></div><ErrorMessage message={error} />
+      {summary ? <div className="dashboard-grid"><article className="dashboard-tile"><span>{t('users')}</span><strong>{metrics.users}</strong></article><article className="dashboard-tile"><span>{t('gmv')}</span><strong>{formatMoney(metrics.gmvKes)}</strong><small>{metrics.paidOrders} {t('paidOrders')}</small></article><article className="dashboard-tile"><span>{t('payoutRecords')}</span><strong>{metrics.payoutRecords}</strong></article></div> : !error && <p role="status">{t('loadingReport')}</p>}
+      {summary && <div className="summary-columns"><section><h3>{t('listingsByCategory')}</h3>{summary.listings.byCategory.map((row) => <p key={row.category}>{row.category}: {row.count}</p>)}</section><section><h3>{t('listingsByCounty')}</h3>{summary.listings.byCounty.map((row) => <p key={row.county}>{row.county}: {row.count}</p>)}</section><section><h3>{t('ordersByStatus')}</h3>{summary.orders.byStatus.map((row) => <p key={row.status}>{row.status}: {row.count}</p>)}</section></div>}
+    </section>
+  </main>;
+}
+
+export function AdminUsers() {
+  const { t } = useI18n();
+  const [users, setUsers] = useState([]);
+  const [error, setError] = useState('');
+  const load = () => get('/admin/users').then((result) => setUsers(result.users || [])).catch((err) => setError(err.message));
+  useEffect(() => { load(); }, []);
+  const suspend = async (uid) => {
+    try { await post(`/admin/sellers/${encodeURIComponent(uid)}/suspend`, {}); await load(); }
+    catch (err) { setError(err.message); }
+  };
+  return <main className="page"><h1>{t('manageUsers')}</h1><ErrorMessage message={error} />
+    <div className="user-admin-list">{users.map((user) => <article className="order-card" key={user.uid}>
+      <div><strong>{user.sellerProfile?.displayName || user.username || user.email || user.uid}</strong><p>{user.email} · {(user.roles || ['buyer']).map((role) => role === 'seller' ? t('farmer') : role).join(', ')}</p>
+        {user.sellerProfile && <p>{user.sellerProfile.county}, {user.sellerProfile.town} · {user.sellerProfile.suspended ? t('suspended') : t('activeAccount')}</p>}</div>
+      {user.roles?.includes('seller') && !user.sellerProfile?.suspended && <button className="button button-secondary" onClick={() => suspend(user.uid)}>{t('suspendFarmer')}</button>}
+    </article>)}</div>
+  </main>;
+}
+
+export function AdminCategories() {
+  const { t } = useI18n();
+  const [categories, setCategories] = useState([]);
+  const [name, setName] = useState('');
+  const [names, setNames] = useState({});
+  const [error, setError] = useState('');
+  const load = () => get('/admin/categories').then((result) => setCategories(result.categories || [])).catch((err) => setError(err.message));
+  useEffect(() => { load(); }, []);
+  const create = async (event) => {
+    event.preventDefault();
+    try { await post('/admin/categories', { name }); setName(''); setError(''); await load(); }
+    catch (err) { setError(err.message); }
+  };
+  const remove = async (category) => {
+    try { await del(`/admin/categories/${encodeURIComponent(category.id)}`); await load(); }
+    catch (err) { setError(err.message); }
+  };
+  const rename = async (category) => {
+    try { await patch(`/admin/categories/${encodeURIComponent(category.id)}`, { name: names[category.id] ?? category.name }); setError(''); await load(); }
+    catch (err) { setError(err.message); }
+  };
+  return <main className="page narrow-page"><h1>{t('manageCategories')}</h1><ErrorMessage message={error} />
+    <form className="stack-form" onSubmit={create}><label>{t('newCategory')}<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label><button className="button button-primary">{t('addCategory')}</button></form>
+    <ul className="category-list">{categories.map((category) => <li key={category.id}><input aria-label={`${t('category')} ${category.name}`} value={names[category.id] ?? category.name} onChange={(event) => setNames((current) => ({ ...current, [category.id]: event.target.value }))} /><div><button className="text-button" onClick={() => rename(category)}>{t('save')}</button><button className="text-button" onClick={() => remove(category)}>{t('delete')}</button></div></li>)}</ul>
+  </main>;
 }
 
 export function AdminReports() {
@@ -634,7 +704,12 @@ export function Account() {
   const { t } = useI18n();
   const { user, profile } = useAuth();
   if (!user) return <Navigate to="/sign-in" replace />;
-  return <main className="page"><h1>{t('account')}</h1><p>{user.displayName || user.email}</p><p>{profile?.username || user.uid}</p><div className="action-row"><Link className="button button-secondary" to="/seller/profile">{t('sellerProfile')}</Link><Link className="button button-secondary" to="/orders">{t('orders')}</Link></div></main>;
+  const roleLabels = (profile?.roles || ['buyer']).map((role) => ({
+    buyer: t('buyer'),
+    seller: t('farmer'),
+    admin: t('administrator')
+  })[role] || role);
+  return <main className="page"><h1>{t('account')}</h1><p>{user.displayName || user.email}</p><p>{profile?.username || user.uid}</p><p><strong>{t('accountRole')}:</strong> {roleLabels.join(', ')}</p><div className="action-row"><Link className="button button-secondary" to="/seller/profile">{t('sellerProfile')}</Link><Link className="button button-secondary" to="/orders">{t('orders')}</Link></div></main>;
 }
 
 export function NotFound() {

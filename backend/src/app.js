@@ -14,6 +14,9 @@ import { createPaymentRouter } from './modules/payments/routes.js';
 import { createReviewRouter } from './modules/reviews/routes.js';
 import { createAdminRouter } from './modules/admin/routes.js';
 import { createReportRouter } from './modules/reports/routes.js';
+import { createMessagingRouter } from './modules/messaging/routes.js';
+import { createNotificationRouter } from './modules/notifications/routes.js';
+import { createCategoryAdminRouter } from './modules/admin/categories.js';
 
 export function createApp({
   productRouter = createProductRouter(),
@@ -21,7 +24,10 @@ export function createApp({
   paymentRouter = createPaymentRouter(),
   reviewRouter = createReviewRouter(),
   adminRouter = createAdminRouter(),
-  reportRouter = createReportRouter()
+  reportRouter = createReportRouter(),
+  messagingRouter = createMessagingRouter(),
+  notificationRouter = createNotificationRouter(),
+  categoryAdminRouter = createCategoryAdminRouter()
 } = {}) {
   const app = express();
   const disableSharedCaching = (_req, res, next) => {
@@ -58,6 +64,9 @@ export function createApp({
   app.use('/api', reviewRouter);
   app.use('/api', adminRouter);
   app.use('/api', reportRouter);
+  app.use('/api', messagingRouter);
+  app.use('/api', notificationRouter);
+  app.use('/api', categoryAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

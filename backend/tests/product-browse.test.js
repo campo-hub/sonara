@@ -74,7 +74,8 @@ async function startServer(app) {
 test('browse query validates filters, prices, coordinates, sorts and pagination size', () => {
   assert.equal(options({ q: 'maize', category: 'cereals', county: 'Kiambu', minPrice: '10', maxPrice: '200' }).filters.q, 'maize');
   assert.equal(options({ limit: '60' }).limit, 60);
-  assert.throws(() => options({ category: 'not-a-category' }), /category is not supported/);
+  assert.equal(options({ category: 'new farmer category' }).filters.category, 'new farmer category');
+  assert.throws(() => options({ category: 'bad/category' }), /category is not supported/);
   assert.throws(() => options({ limit: '61' }), /limit must be between/);
   assert.throws(() => options({ minPrice: '10.5' }), /whole-shilling/);
   assert.throws(() => options({ minPrice: '200', maxPrice: '100' }), /cannot exceed/);
@@ -185,7 +186,7 @@ test('browse list routes return thumbnails and public cache headers, but disable
 
   const categoriesResponse = await fetch(`${server.url}/api/categories`);
   const categories = await categoriesResponse.json();
-  assert.equal(categories.categories.includes('cereals'), true);
+  assert.equal(categories.categories.some((category) => category.id === 'cereals'), true);
 
   const sellerResponse = await fetch(`${server.url}/api/sellers/seller-1`);
   const sellerPayload = await sellerResponse.json();

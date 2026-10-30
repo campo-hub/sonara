@@ -29,7 +29,8 @@ export function createApiClient({ baseUrl, fetcher = fetch, tokenProvider = asyn
     get: (path, options) => request(path, options),
     post: (path, data) => request(path, { method: 'POST', body: JSON.stringify(data ?? {}) }),
     put: (path, data) => request(path, { method: 'PUT', body: JSON.stringify(data ?? {}) }),
-    patch: (path, data) => request(path, { method: 'PATCH', body: JSON.stringify(data ?? {}) })
+    patch: (path, data) => request(path, { method: 'PATCH', body: JSON.stringify(data ?? {}) }),
+    del: (path) => request(path, { method: 'DELETE' })
   };
 }
 
@@ -45,6 +46,7 @@ export const get = defaultClient.get;
 export const post = defaultClient.post;
 export const put = defaultClient.put;
 export const patch = defaultClient.patch;
+export const del = defaultClient.del;
 
 export function upload(path, formData, onProgress = () => {}, method = 'POST') {
   const user = getCurrentUser();

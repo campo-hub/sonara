@@ -1,5 +1,4 @@
 import { parseMoney } from '../../lib/money.js';
-import { PRODUCT_CATEGORIES } from '../../models/marketplace.js';
 import { HttpError } from '../../middleware/errors.js';
 
 export const BROWSE_SORTS = Object.freeze(['newest', 'price_asc', 'price_desc', 'nearest', 'top_rated']);
@@ -41,7 +40,7 @@ export function parseBrowseQuery(query = {}) {
   const category = String(query.category || '').trim().toLowerCase();
   const county = String(query.county || '').trim();
   if (q.length > 100) throw new HttpError(400, 'q must be at most 100 characters.', 'INVALID_QUERY');
-  if (category && !PRODUCT_CATEGORIES.includes(category)) {
+  if (category.length > 100 || (category && !/^[a-z0-9][a-z0-9 &_-]*$/i.test(category))) {
     throw new HttpError(400, 'category is not supported.', 'INVALID_QUERY');
   }
   if (county.length > 100) throw new HttpError(400, 'county must be at most 100 characters.', 'INVALID_QUERY');
@@ -123,7 +122,7 @@ export function toBrowseProduct(product) {
     width: image.width,
     height: image.height
   }));
-  const { distanceMeters, ...publicProduct } = product;
+  const { distanceMeters, normalizedTitle, ...publicProduct } = product;
   return {
     ...publicProduct,
     ...(Number.isFinite(distanceMeters) ? { distanceKm: Math.round(distanceMeters / 10) / 100 } : {}),

@@ -177,6 +177,51 @@ export async function getProductById(id) {
   return collection.findOne({ id }, { projection: { _id: 0 } });
 }
 
+export function normalizeProductName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function filterComparableProducts(products, product, { county = '', limit = 20 } = {}) {
+  return products.filter((item) => item.id !== product.id
+    && item.status === 'active'
+    && item.quantityAvailable - (item.quantityReserved || 0) > 0
+    && item.category === product.category
+    && normalizeProductName(item.title) === normalizeProductName(product.title)
+    && (!county || item.location?.county?.toLowerCase() === county.toLowerCase()))
+    .sort((left, right) => left.pricePerUnit - right.pricePerUnit || left.id.localeCompare(right.id))
+    .slice(0, limit);
+}
+
+export async function findComparableProducts(product, { county = '', limit = 20 } = {}) {
+  const collection = await getProductsCollection();
+  const items = collection
+    ? await collection.find({
+      id: { $ne: product.id },
+      category: product.category,
+      status: 'active',
+      $or: [
+        { normalizedTitle: normalizeProductName(product.title) },
+        { normalizedTitle: { $exists: false } }
+      ],
+      ...(county ? { 'location.county': new RegExp(`^${escapeRegex(county)}$`, 'i') } : {}),
+      $expr: { $gt: [{ $subtract: ['$quantityAvailable', { $ifNull: ['$quantityReserved', 0] }] }, 0] }
+    }, { projection: { _id: 0 } }).limit(1000).toArray()
+    : [...memoryProducts.values()];
+  return filterComparableProducts(items, product, { county, limit });
+}
+
+export async function countProductsForCategory(categoryId) {
+  const collection = await getProductsCollection();
+  if (!collection) return [...memoryProducts.values()].filter((item) => item.category === categoryId).length;
+  return collection.countDocuments({ category: categoryId });
+}
+
 export async function listProductsForSeller(sellerUid) {
   const collection = await getProductsCollection();
   if (!collection) {

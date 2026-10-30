@@ -2,16 +2,18 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { HttpError } from '../../middleware/errors.js';
 import { clearRoleCache, requireRole } from '../../middleware/roles.js';
-import { getUserProfile, updateSellerAdminState } from '../../userStore.js';
+import { getUserProfile, listUserProfiles, updateSellerAdminState } from '../../userStore.js';
 import {
   appendAuditLog,
   listAdminOrders,
   listAdminPayments,
+  getAdminSummary,
   resolveOrderDispute
 } from './store.js';
 import { getProductById, listProductsByStatus, setSellerProductsStatus, updateProduct } from '../products/store.js';
 import { getOrderById } from '../orders/store.js';
 import { getProductReport, listOpenProductReports, resolveProductReport } from '../reports/store.js';
+import { notify } from '../../lib/notify.js';
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -49,15 +51,18 @@ export function createAdminRouter({
   changeProduct = updateProduct,
   changeSellerProducts = setSellerProductsStatus,
   getSeller = getUserProfile,
+  listUsers = listUserProfiles,
   changeSeller = updateSellerAdminState,
   listOrders = listAdminOrders,
   listPayments = listAdminPayments,
+  getSummary = getAdminSummary,
   getOrder = getOrderById,
   getProduct = getProductById,
   resolveDispute = resolveOrderDispute,
   listReports = listOpenProductReports,
   getReport = getProductReport,
-  resolveReport = resolveProductReport
+  resolveReport = resolveProductReport,
+  notifyFn = notify
 } = {}) {
   const router = Router();
 const protect = [authMiddleware, requireAdminMiddleware];
@@ -71,10 +76,15 @@ router.get('/admin/listings', ...protect, asyncRoute(async (req, res) => {
     res.set('Cache-Control', 'private, no-store').json({ products });
   }));
 
+  router.get('/admin/users', ...protect, asyncRoute(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store').json({ users: await listUsers(boundedLimit(req.query.limit)) });
+  }));
+
   router.post('/admin/listings/:id/approve', ...protect, asyncRoute(async (req, res) => {
     const product = await changeProduct(req.params.id, { status: 'active', updatedAt: new Date() }, 'pending');
     if (!product) throw new HttpError(409, 'Only a pending listing can be approved.', 'LISTING_STATE_CHANGED');
     await audit({ at: new Date(), actorUid: req.user.uid, action: 'listing.approved', entity: 'product', entityId: product.id, meta: {} });
+    await notifyFn({ to: product.sellerUid, template: 'listing_approved', data: { productId: product.id, productTitle: product.title } });
     res.set('Cache-Control', 'private, no-store').json({ product });
   }));
 
@@ -87,11 +97,33 @@ router.get('/admin/listings', ...protect, asyncRoute(async (req, res) => {
     }, 'pending');
     if (!product) throw new HttpError(409, 'Only a pending listing can be rejected.', 'LISTING_STATE_CHANGED');
     await audit({ at: new Date(), actorUid: req.user.uid, action: 'listing.rejected', entity: 'product', entityId: product.id, meta: { reason } });
+    await notifyFn({ to: product.sellerUid, template: 'listing_rejected', data: { productId: product.id, productTitle: product.title } });
     res.set('Cache-Control', 'private, no-store').json({ product });
   }));
 
   router.get('/admin/reports', ...protect, asyncRoute(async (req, res) => {
     res.set('Cache-Control', 'private, no-store').json({ reports: await listReports(boundedLimit(req.query.limit)) });
+  }));
+
+  router.get('/admin/reports/summary', ...protect, asyncRoute(async (_req, res) => {
+    res.set('Cache-Control', 'private, no-store').json({ summary: await getSummary() });
+  }));
+
+  router.get('/admin/reports/summary.csv', ...protect, asyncRoute(async (req, res) => {
+    const summary = await getSummary();
+    const rows = [
+      ['section', 'key', 'count', 'amountKes'],
+      ['users', 'total', summary.users.total, ''],
+      ...summary.listings.byCategory.map((row) => ['listings_by_category', row.category, row.count, '']),
+      ...summary.listings.byCounty.map((row) => ['listings_by_county', row.county, row.count, '']),
+      ...summary.orders.byStatus.map((row) => ['orders_by_status', row.status, row.count, '']),
+      ['gmv', 'total', summary.gmv.orderCount, summary.gmv.amountKes],
+      ...summary.payouts.map((row) => ['payouts', row.status, row.count, row.amountKes])
+    ];
+    await audit({ at: new Date(), actorUid: req.user.uid, action: 'admin.summary_exported', entity: 'reports', entityId: '', meta: {} });
+    res.set('Cache-Control', 'private, no-store').type('text/csv')
+      .attachment('agristore-summary.csv')
+      .send(rows.map((row) => row.map(csvCell).join(',')).join('\r\n'));
   }));
 
   router.post('/admin/reports/:id/takedown', ...protect, asyncRoute(async (req, res) => {

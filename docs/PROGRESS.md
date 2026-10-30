@@ -132,7 +132,8 @@ Payments remain disabled until provider settings are configured. Live PesaPal cr
 
 | Item | Status | Verification |
 |---|---|---|
-| Notification interface with console driver; order placed, seller new-order, paid, confirmed, dispatched, and delivered events | DONE | Backend tests exercise checkout, lifecycle transitions, and verified payment flow; structured console messages include template and order ID |
+| In-app notification feed; order placed, seller new-order, paid, confirmed, dispatched, delivered, and listing moderation events | DONE | Local tests cover feed access/read behavior and existing lifecycle tests exercise emitted events |
+| Optional email and Africa's Talking SMS adapters | CODE-ONLY | Configuration validation and adapter code are present; no external provider credentials or delivery destination were configured |
 | Buyer reviews limited to completed orders containing the product; one review per order/product | DONE | `phase7.test.js` verifies ineligible reviews, successful submission, and duplicate rejection |
 | Product rating average and count updated atomically in MongoDB | CODE-ONLY | MongoDB aggregation-pipeline update implemented; local MongoDB is unavailable |
 | Admin listing review, seller suspension and verification, filtered order/payment lists, dispute resolution, CSV export | CODE-ONLY | Routes and scoped store operations implemented; live Mongo persistence and end-to-end admin verification remain outstanding |
@@ -141,7 +142,7 @@ Payments remain disabled until provider settings are configured. Live PesaPal cr
 | Backend tests | DONE | `npm --prefix backend test` — 50 passed, 0 failed |
 | Web regression tests | DONE | `npm --prefix Web test` — 26 passed, 0 failed |
 
-Notification delivery currently uses the console driver only. Provider delivery, MongoDB-backed reviews/admin actions, and operational verification require later configuration/testing.
+In-app notification storage uses MongoDB when configured and memory for local execution. External delivery, MongoDB-backed reviews/admin actions, and operational verification require later configuration/testing.
 
 ## Phase 8 — Modular marketplace frontend
 
@@ -172,7 +173,7 @@ The responsive browser check is not a substitute for the automated light/dark sc
 | Backend tests | DONE | `npm --prefix backend test` — 53 passed, 0 failed |
 | Web tests and production build | DONE | `npm --prefix Web test` — 34 passed, 0 failed; `npm --prefix Web run build` completed |
 
-The report API stores records in MongoDB when configured and uses an in-memory store for local tests. MongoDB report persistence and the live administrator workflow remain unverified without a configured database. Seller payout automation, self-service account deletion, and external notification delivery remain out of scope for the current implementation and are called out in the operating/legal docs.
+The report API stores records in MongoDB when configured and uses an in-memory store for local tests. MongoDB report persistence and the live administrator workflow remain unverified without a configured database. Seller payout automation and self-service account deletion remain out of scope and are called out in the operating/legal docs.
 
 ## Phase 10 — Release quality and handoff
 
@@ -189,3 +190,17 @@ The report API stores records in MongoDB when configured and uses an in-memory s
 | Open pull request to `main` | BLOCKED | Not opened: automated layout QA, live service flows, and legacy parity are release gates still outstanding |
 
 The current local branch contains Phase 8 and Phase 9 commits plus the reviewed dependency upgrades; the final release handoff is intentionally incomplete. Run the automated and configured-service checks and verify parity before opening a release PR.
+
+## User-requested Phase 1 — Proposal alignment (2026-10-30)
+
+| Item | Status | Verification |
+|---|---|---|
+| Product price comparison endpoint and product/browse comparison views | DONE | Local backend tests exercise normalized matching, county filtering, price order, seller/location/rating response; Web tests (38 passed) and production build pass |
+| Messaging conversations, participant authorization, bounded plain-text messages, cursor paging, read receipts, and reports | DONE | Local HTTP tests cover participant denial, sanitation/length enforcement, and admin access only through an open report; Web tests/build pass |
+| In-app notifications, unread count, read actions, and order/payment/listing events | DONE | Local notification endpoint tests pass; existing order/payment lifecycle tests execute event emission |
+| Optional email/SMS adapters | CODE-ONLY | Email webhook and Africa's Talking adapter require external configuration and were not live-tested |
+| Admin category CRUD, user summary/seller administration, and summary/CSV reporting | CODE-ONLY | Routes and UI are implemented; injected route tests pass. MongoDB report aggregation and live admin workflows were not verified |
+| Proposal alignment matrix | DONE | [`PROPOSAL-ALIGNMENT.md`](./PROPOSAL-ALIGNMENT.md) maps the supplied requirements; the proposal PDF itself was unavailable, so Appendix II–IV wording is not claimed |
+| Backend regression suite | DONE | `npm --prefix backend test` — 59 passed, 0 failed |
+| Web regression suite and production build | DONE | `npm --prefix Web test` — 38 passed, 0 failed; `npm --prefix Web run build` completed |
+| Firebase, MongoDB, R2, payment, and external-notification live verification | BLOCKED | No external services were configured or accessed for this phase |

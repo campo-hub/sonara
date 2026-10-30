@@ -34,6 +34,14 @@ export const config = Object.freeze({
     ...splitList(env.CORS_ORIGIN),
     ...(!isProduction ? ['http://localhost:5173'] : [])
   ]),
+  notificationDrivers: Object.freeze({
+    emailUrl: env.NOTIFICATION_EMAIL_URL || '',
+    emailToken: env.NOTIFICATION_EMAIL_TOKEN || '',
+    africaTalkingUsername: env.AFRICASTALKING_USERNAME || '',
+    africaTalkingApiKey: env.AFRICASTALKING_API_KEY || '',
+    africaTalkingSenderId: env.AFRICASTALKING_SENDER_ID || '',
+    africaTalkingEnvironment: env.AFRICASTALKING_ENVIRONMENT || 'sandbox'
+  }),
   r2: Object.freeze({
     accountId: env.R2_ACCOUNT_ID || '',
     accessKeyId: env.R2_ACCESS_KEY_ID || '',
@@ -46,6 +54,27 @@ export const config = Object.freeze({
 export function assertRuntimeConfig(runtimeConfig = config) {
   if (runtimeConfig.isProduction && !runtimeConfig.mongoUri) {
     throw new Error('MONGODB_URI is required when NODE_ENV=production.');
+  }
+  const notificationDrivers = runtimeConfig.notificationDrivers || {};
+  for (const [label, url, token] of [
+    ['NOTIFICATION_EMAIL', notificationDrivers.emailUrl, notificationDrivers.emailToken]
+  ]) {
+    if (Boolean(url) !== Boolean(token)) {
+      throw new Error(`${label}_URL and ${label}_TOKEN must be configured together.`);
+    }
+    if (url) {
+      let parsed;
+      try { parsed = new URL(url); } catch { throw new Error(`${label}_URL must be an absolute URL.`); }
+      if (!['https:', ...(!runtimeConfig.isProduction ? ['http:'] : [])].includes(parsed.protocol)) {
+        throw new Error(`${label}_URL must use HTTPS in production.`);
+      }
+    }
+  }
+  if (Boolean(notificationDrivers.africaTalkingUsername) !== Boolean(notificationDrivers.africaTalkingApiKey)) {
+    throw new Error('AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY must be configured together.');
+  }
+  if (!['sandbox', 'production'].includes(notificationDrivers.africaTalkingEnvironment || 'sandbox')) {
+    throw new Error('AFRICASTALKING_ENVIRONMENT must be sandbox or production.');
   }
   if (!Number.isInteger(runtimeConfig.port) || runtimeConfig.port < 1 || runtimeConfig.port > 65535) {
     throw new Error('PORT must be an integer between 1 and 65535.');

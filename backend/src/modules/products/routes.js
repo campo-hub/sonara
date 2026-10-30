@@ -22,15 +22,17 @@ import {
 import {
   browseProducts,
   deleteProductRecord,
+  findComparableProducts,
   getProductById,
   insertProduct,
+  normalizeProductName,
   listActiveProductsForSeller,
   listProductsForSeller,
   productHasOrders,
   updateProduct
 } from './store.js';
 import { getPublicSellerProfile } from '../../userStore.js';
-import { PRODUCT_CATEGORIES } from '../../models/marketplace.js';
+import { listCategories } from './categories.js';
 import {
   encodeBrowseCursor,
   parseBrowseQuery,
@@ -118,6 +120,11 @@ function roundStoredLocation(existing, patch) {
   return location;
 }
 
+function productResponse(product) {
+  const { normalizedTitle, ...response } = product;
+  return response;
+}
+
 export function createProductRouter({
   store = {
     insertProduct,
@@ -127,7 +134,8 @@ export function createProductRouter({
     productHasOrders,
     deleteProductRecord,
     browseProducts,
-    listActiveProductsForSeller
+    listActiveProductsForSeller,
+    findComparableProducts
   },
   storage = { putObject, deleteObject, publicUrlFor },
   authMiddleware = requireAuth,
@@ -137,15 +145,24 @@ export function createProductRouter({
   getSellerProfile = getPublicSellerProfile,
   browse = store.browseProducts || browseProducts,
   listActiveForSeller = store.listActiveProductsForSeller || listActiveProductsForSeller,
+  findComparables = store.findComparableProducts || findComparableProducts,
+  categories = listCategories,
   moderateListings = config.moderateListings,
   rateLimiter = createUserRateLimiter()
 } = {}) {
   const router = Router();
+  const assertKnownCategory = async (category) => {
+    if (!category) return;
+    const available = await categories();
+    if (!available.some((item) => item.id === category)) {
+      throw new HttpError(400, 'category is not supported.', 'INVALID_PRODUCT');
+    }
+  };
 
-  router.get('/categories', (_req, res) => {
-    res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
-    res.json({ categories: PRODUCT_CATEGORIES });
-  });
+  router.get('/categories', asyncRoute(async (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({ categories: await categories() });
+  }));
 
   router.get('/products', optionalAuthMiddleware, asyncRoute(async (req, res) => {
     const options = parseBrowseQuery(req.query);
@@ -181,6 +198,7 @@ export function createProductRouter({
       assertAllowedFields(req.body);
       for (const file of req.files || []) assertImageFile(file);
       const fields = parseProductFields(req.body);
+      await assertKnownCategory(fields.category);
       const id = randomUUID();
       const { images, uploadedKeys } = await uploadProductImages({
         productId: id,
@@ -193,6 +211,7 @@ export function createProductRouter({
         sellerUid: req.user.uid,
         status: moderateListings ? 'pending' : 'active',
         ...fields,
+        normalizedTitle: normalizeProductName(fields.title),
         quantityReserved: 0,
         images,
         ratingAvg: 0,
@@ -211,13 +230,13 @@ export function createProductRouter({
         await cleanupFailedUpload(uploadedKeys, storage);
         throw error;
       }
-      res.set('Cache-Control', 'private, no-store').status(201).json({ product });
+      res.set('Cache-Control', 'private, no-store').status(201).json({ product: productResponse(product) });
     })
   );
 
   router.get('/me/products', authMiddleware, requireSellerMiddleware, asyncRoute(async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
-    res.json({ products: await store.listProductsForSeller(req.user.uid) });
+    res.json({ products: (await store.listProductsForSeller(req.user.uid)).map(productResponse) });
   }));
 
   router.get('/products/:id', optionalAuthMiddleware, asyncRoute(async (req, res) => {
@@ -228,7 +247,23 @@ export function createProductRouter({
       await assertOwnerOrAdmin(product, req, isAdmin);
     }
     res.set('Cache-Control', product.status === 'active' && !req.user ? 'public, max-age=30' : 'private, no-store');
-    res.json({ product });
+    res.json({ product: productResponse(product) });
+  }));
+
+  router.get('/products/:id/price-comparison', optionalAuthMiddleware, asyncRoute(async (req, res) => {
+    const product = await store.getProductById(req.params.id);
+    if (!product || product.status !== 'active') throw new HttpError(404, 'Product not found.', 'PRODUCT_NOT_FOUND');
+    const unknownQuery = Object.keys(req.query).some((key) => key !== 'county');
+    if (unknownQuery) throw new HttpError(400, 'Unsupported comparison filter.', 'INVALID_FILTER');
+    const county = String(req.query.county || '').trim();
+    if (county.length > 100) throw new HttpError(400, 'county must be at most 100 characters.', 'INVALID_QUERY');
+    const matches = await findComparables(product, { county, limit: 20 });
+    const comparisons = await Promise.all(matches.map(async (match) => ({
+      product: toBrowseProduct(match),
+      seller: await getSellerProfile(match.sellerUid)
+    })));
+    res.set('Cache-Control', req.user ? 'private, no-store' : 'public, max-age=30')
+      .json({ productId: product.id, comparisons });
   }));
 
   router.patch('/products/:id', authMiddleware, rateLimiter, parseImages, asyncRoute(async (req, res) => {
@@ -239,6 +274,7 @@ export function createProductRouter({
     for (const file of req.files || []) assertImageFile(file);
 
     const patch = parseProductFields(req.body, { partial: true });
+    await assertKnownCategory(patch.category);
     const originalImages = existing.images || [];
     const removeKeys = parseImageKeyList(req.body.removeImageKeys, 'removeImageKeys');
     const imageOrder = parseImageKeyList(req.body.imageOrder, 'imageOrder');
@@ -265,6 +301,7 @@ export function createProductRouter({
 
     const update = {
       ...patch,
+      ...(patch.title ? { normalizedTitle: normalizeProductName(patch.title) } : {}),
       ...(patch.location ? { location: roundStoredLocation(existing.location, patch) } : {}),
       images: [...retained, ...addedImages],
       updatedAt: new Date()
@@ -287,7 +324,7 @@ export function createProductRouter({
       throw new HttpError(404, 'Product not found.', 'PRODUCT_NOT_FOUND');
     }
     if (removedImages.length) await deleteProductImages(removedImages, storage);
-    res.json({ product: saved });
+    res.json({ product: productResponse(saved) });
   }));
 
   router.post('/products/:id/pause', authMiddleware, asyncRoute(async (req, res) => {
@@ -299,7 +336,7 @@ export function createProductRouter({
     }
     const saved = await store.updateProduct(product.id, { status: 'paused', updatedAt: new Date() }, product.status);
     if (!saved) throw new HttpError(409, 'The product status changed; reload and try again.', 'PRODUCT_STATE_CHANGED');
-    res.json({ product: saved });
+    res.json({ product: productResponse(saved) });
   }));
 
   router.post('/products/:id/resume', authMiddleware, asyncRoute(async (req, res) => {
@@ -312,7 +349,7 @@ export function createProductRouter({
     const status = product.quantityAvailable > product.quantityReserved ? 'active' : 'sold_out';
     const saved = await store.updateProduct(product.id, { status, updatedAt: new Date() }, 'paused');
     if (!saved) throw new HttpError(409, 'The product status changed; reload and try again.', 'PRODUCT_STATE_CHANGED');
-    res.json({ product: saved });
+    res.json({ product: productResponse(saved) });
   }));
 
   router.delete('/products/:id', authMiddleware, asyncRoute(async (req, res) => {
@@ -323,7 +360,7 @@ export function createProductRouter({
     if (await store.productHasOrders(product.id)) {
       const saved = await store.updateProduct(product.id, { status: 'removed', updatedAt: new Date() }, product.status);
       if (!saved) throw new HttpError(409, 'The product changed; reload and try again.', 'PRODUCT_STATE_CHANGED');
-      return res.json({ deleted: false, product: saved });
+      return res.json({ deleted: false, product: productResponse(saved) });
     }
 
     const hidden = await store.updateProduct(product.id, { status: 'removed', updatedAt: new Date() }, product.status);
